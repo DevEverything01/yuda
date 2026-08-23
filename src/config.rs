@@ -145,10 +145,44 @@ impl Config {
         }
         let raw = fs::read_to_string(path)
             .with_context(|| format!("读取配置失败: {}", path.display()))?;
-        toml::from_str(&raw).with_context(|| format!("解析配置失败: {}", path.display()))
+        let config: Self = toml::from_str(&raw).with_context(|| {
+            format!(
+                "解析配置失败: {}；请检查 TOML 和 engine/language/hotkey 字段",
+                path.display()
+            )
+        })?;
+        config
+            .validate()
+            .with_context(|| format!("配置无效: {}", path.display()))?;
+        Ok(config)
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if !matches!(self.engine.as_str(), "auto" | "offline" | "cloud") {
+            anyhow::bail!("engine 必须是 cloud / offline / auto");
+        }
+        if !matches!(self.language.as_str(), "zh" | "en" | "yue" | "ja" | "ko") {
+            anyhow::bail!("language 必须是 zh / en / yue / ja / ko");
+        }
+        if self.hotkey.trim().is_empty() {
+            anyhow::bail!("hotkey 不能为空");
+        }
+        if self.offline.language != "auto"
+            && !matches!(
+                self.offline.language.as_str(),
+                "zh" | "en" | "yue" | "ja" | "ko"
+            )
+        {
+            anyhow::bail!("offline.language 必须是 auto / zh / en / yue / ja / ko");
+        }
+        if self.offline.num_threads < 1 {
+            anyhow::bail!("offline.num_threads 必须大于 0");
+        }
+        Ok(())
     }
 
     pub fn save(&self, path: impl AsRef<Path>) -> Result<()> {
+        self.validate().context("拒绝保存无效配置")?;
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)

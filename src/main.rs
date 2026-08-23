@@ -11,26 +11,68 @@ use yuda::{
 };
 
 fn main() -> Result<()> {
+    #[cfg(feature = "linux-runtime")]
+    init_logging();
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
-        Some("--ui") => print_ui(&demo_session()),
-        Some("--demo-recording") => print_ui(&demo_recording_session()),
-        Some("--json") => print_json(&demo_session())?,
-        Some("--config") => print_config_path(),
-        Some("--simulate") => run_simulation()?,
-        Some("--help") | None => print_help(),
+        Some("--daemon") => run_daemon(),
+        Some("--ui") => {
+            print_ui(&demo_session());
+            Ok(())
+        }
+        Some("--demo-recording") => {
+            print_ui(&demo_recording_session());
+            Ok(())
+        }
+        Some("--json") => print_json(&demo_session()),
+        Some("--config") => {
+            print_config_path();
+            Ok(())
+        }
+        Some("--simulate") => run_simulation(),
+        Some("--help") | None => {
+            print_help();
+            Ok(())
+        }
         Some(command) => {
             eprintln!("未知命令：{command}");
             print_help();
+            Ok(())
         }
     }
-    Ok(())
+}
+
+#[cfg(feature = "linux-runtime")]
+fn init_logging() {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+}
+
+#[cfg(feature = "linux-runtime")]
+fn run_daemon() -> Result<()> {
+    #[cfg(feature = "sensevoice")]
+    {
+        return yuda::daemon::run();
+    }
+    #[cfg(not(feature = "sensevoice"))]
+    {
+        anyhow::bail!("daemon 需要使用 `--features linux-runtime,sensevoice` 构建");
+    }
+}
+
+#[cfg(not(feature = "linux-runtime"))]
+fn run_daemon() -> Result<()> {
+    anyhow::bail!(
+        "daemon 仅支持 Linux；请在 Omarchy 上使用 --features linux-runtime,sensevoice 构建"
+    )
 }
 
 fn print_help() {
     println!("语打 Yuda · 中文优先的语音输入");
     println!();
     println!("用法：");
+    println!("  yuda --daemon          启动 Linux 全局语音输入 daemon");
     println!("  yuda --ui              查看空闲 UI 状态");
     println!("  yuda --demo-recording 查看录音中 UI 状态");
     println!("  yuda --json            输出 Waybar 风格状态");

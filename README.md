@@ -4,7 +4,7 @@
 
 对标豆包输入法的语音体验——豆包同源的云端语音大模型 + 端侧离线兜底 + AI 保守纠错，填补 Linux 桌面中文语音输入的空白。
 
-> 当前状态：**UI 产品化预览已可运行**。Rust 状态机、配置、上屏序列与浏览器交互流程已建立；真实 Hyprland、evdev、音频设备与系统级上屏仍待 Linux 目标环境验证。
+> 当前状态：**Linux daemon 已接入真实 evdev、cpal、SenseVoice 与 Wayland 剪贴板上屏链路**。需要使用 `--features daemon` 构建，并在 Omarchy 上下载 SenseVoice 模型后启用用户服务；真实硬件 smoke test 仍以目标机输出为准。
 
 ## 为什么是语打
 

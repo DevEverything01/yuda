@@ -4,12 +4,12 @@ pkgver=r1
 pkgrel=1
 pkgdesc='中文优先的 Wayland 语音输入 daemon'
 arch=('x86_64' 'aarch64')
-url='https://github.com/yuda-ime/yuda'
+url='https://github.com/DevEverything01/yuda'
 license=('MIT')
 depends=('wl-clipboard' 'wtype' 'pipewire')
 optdepends=('ydotool: Ctrl+V fallback')
 makedepends=('git' 'rust')
-source=('git+https://github.com/example/yuda.git')
+source=('git+https://github.com/DevEverything01/yuda.git')
 sha256sums=('SKIP')
 
 pkgver() {
@@ -19,7 +19,7 @@ pkgver() {
 
 build() {
   cd "$srcdir/yuda"
-  cargo build --release --locked
+  cargo build --release --locked --features daemon
 }
 
 package() {

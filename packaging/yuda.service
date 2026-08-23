@@ -3,7 +3,7 @@ Description=Yuda Chinese-first voice input daemon
 After=graphical-session.target
 
 [Service]
-ExecStart=%h/.local/bin/yuda
+ExecStart=%h/.local/bin/yuda --daemon
 Restart=on-failure
 RestartSec=2
 Environment=RUST_LOG=info

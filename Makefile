@@ -4,10 +4,10 @@ PREFIX ?= /usr/local
 .PHONY: build run install uninstall clean lint fmt ui
 
 build:
-	cargo build --release
+	cargo build --release --features daemon
 
 run:
-	cargo run -- --help
+	cargo run --features daemon -- --help
 
 install: build
 	install -Dm755 target/release/$(APP) $(DESTDIR)$(PREFIX)/bin/$(APP)

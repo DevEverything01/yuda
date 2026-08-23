@@ -97,6 +97,16 @@ impl Session {
         }
     }
 
+    pub fn begin_transcribing(&mut self) -> bool {
+        if self.state != SessionState::Recording {
+            return false;
+        }
+        self.state = SessionState::Transcribing;
+        self.transcript = None;
+        self.level = 0;
+        true
+    }
+
     pub fn stop_recording(&mut self, transcript: Transcript) -> bool {
         if self.state != SessionState::Recording || transcript.is_empty() {
             return false;
