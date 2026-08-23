@@ -1,0 +1,30 @@
+# 语打 Yuda 示例配置 — 复制到 ~/.config/yuda/config.toml 后填写真实值
+# 配置文件权限必须为 0600（安装器会自动设置）
+
+engine = "auto"            # cloud / offline / auto
+language = "zh"            # zh / en / yue / ja / ko
+hotkey = "KEY_RIGHTCTRL"   # evdev 键名；Fn 仅当硬件对 evdev 可见时可用
+
+[cloud]
+# 火山引擎·豆包语音识别大模型（流式）。控制台申请：https://www.volcengine.com/product/asr
+app_id = "your-volc-app-id"
+access_token = "your-volc-access-token"
+endpoint = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
+resource_id = "volc.bigasr.sauc.duration"
+connect_timeout_ms = 2000
+
+[offline]
+# sherpa-onnx SenseVoice int8，首次使用自动下载
+model = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09"
+model_dir = "~/.local/share/yuda/models"
+
+[llm]
+enabled = false
+api_base = "https://api.openai.com/v1"   # 任意 OpenAI 兼容端点
+api_key = ""                             # 支持完全留空
+model = "gpt-4o-mini"
+timeout_ms = 5000
+
+[injection]
+paste_delay_ms = 120
+# 兜底链：wtype → ydotool；二者都缺失时仅复制到剪贴板并通知

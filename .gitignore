@@ -1,0 +1,22 @@
+# Rust / cargo
+/target
+**/*.rs.bk
+# Cargo.lock 故意不忽略：本仓库是应用程序（单二进制），锁定文件必须提交
+
+# 密钥与本地配置——严禁提交
+.env
+.env.*
+config.local.toml
+
+# 模型与运行产物
+/models
+/dist
+*.log
+
+# AUR / makepkg 产物（packaging/ 目录内构建时产生）
+*.pkg.tar.zst
+*.src.tar.gz
+/packaging/pkg/
+
+# 系统杂物
+.DS_Store
