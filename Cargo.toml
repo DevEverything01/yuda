@@ -5,9 +5,15 @@ edition = "2021"
 description = "中文优先的 Wayland 语音输入 daemon"
 license = "MIT"
 
+[features]
+default = []
+# Enables the official sherpa-onnx native runtime for SenseVoice-Small.
+sensevoice = ["dep:sherpa-onnx"]
+
 [dependencies]
 anyhow = "1"
 chrono = { version = "0.4", features = ["clock"] }
+sherpa-onnx = { version = "1.13.5", optional = true, default-features = false, features = ["static"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

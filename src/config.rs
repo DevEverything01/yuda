@@ -9,7 +9,9 @@ pub const DEFAULT_ENGINE: &str = "auto";
 pub const DEFAULT_LANGUAGE: &str = "zh";
 pub const DEFAULT_HOTKEY: &str = "KEY_RIGHTCTRL";
 pub const DEFAULT_CLOUD_ENDPOINT: &str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel";
-pub const DEFAULT_OFFLINE_MODEL: &str = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09";
+/// Official sherpa-onnx SenseVoice-Small int8 package directory.
+/// It contains `model.int8.onnx`, `tokens.txt`, and test audio assets.
+pub const DEFAULT_OFFLINE_MODEL: &str = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17";
 pub const DEFAULT_LLM_MODEL: &str = "gpt-4o-mini";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -43,13 +45,18 @@ pub struct CloudConfig {
     #[serde(default = "default_connect_timeout")]
     pub connect_timeout_ms: u64,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OfflineConfig {
     #[serde(default = "default_offline_model")]
     pub model: String,
     #[serde(default = "default_model_dir")]
     pub model_dir: String,
+    #[serde(default = "default_offline_language")]
+    pub language: String,
+    #[serde(default = "default_offline_use_itn")]
+    pub use_itn: bool,
+    #[serde(default = "default_offline_num_threads")]
+    pub num_threads: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -103,6 +110,9 @@ impl Default for OfflineConfig {
         Self {
             model: default_offline_model(),
             model_dir: default_model_dir(),
+            language: default_offline_language(),
+            use_itn: default_offline_use_itn(),
+            num_threads: default_offline_num_threads(),
         }
     }
 }
@@ -153,6 +163,46 @@ impl Config {
     pub fn default_path() -> Option<PathBuf> {
         std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config/yuda/config.toml"))
     }
+
+    pub fn offline_model_paths(&self) -> OfflineModelPaths {
+        OfflineModelPaths::from_config(&self.offline)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OfflineModelPaths {
+    pub directory: PathBuf,
+    pub model: PathBuf,
+    pub tokens: PathBuf,
+}
+
+impl OfflineModelPaths {
+    pub fn from_config(config: &OfflineConfig) -> Self {
+        let directory = expand_model_dir(&config.model_dir).join(&config.model);
+        Self {
+            model: directory.join("model.int8.onnx"),
+            tokens: directory.join("tokens.txt"),
+            directory,
+        }
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.model.is_file() && self.tokens.is_file()
+    }
+}
+
+fn expand_model_dir(value: &str) -> PathBuf {
+    if value == "~" {
+        return std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(value));
+    }
+    if let Some(rest) = value.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+    PathBuf::from(value)
 }
 
 #[cfg(unix)]
@@ -185,6 +235,15 @@ fn default_offline_model() -> String {
 fn default_model_dir() -> String {
     "~/.local/share/yuda/models".to_owned()
 }
+fn default_offline_language() -> String {
+    "auto".to_owned()
+}
+fn default_offline_use_itn() -> bool {
+    true
+}
+fn default_offline_num_threads() -> i32 {
+    2
+}
 fn default_llm_model() -> String {
     DEFAULT_LLM_MODEL.to_owned()
 }
@@ -200,11 +259,40 @@ fn default_paste_delay() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Config, DEFAULT_CLOUD_ENDPOINT};
+    use super::{Config, DEFAULT_CLOUD_ENDPOINT, DEFAULT_OFFLINE_MODEL};
     use std::{
         fs,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    #[test]
+    fn offline_paths_point_to_sense_voice_files() {
+        let mut config = Config::default();
+        config.offline.model_dir = "/tmp/yuda-models".to_owned();
+        let paths = config.offline_model_paths();
+        assert_eq!(
+            paths.directory,
+            std::path::PathBuf::from(
+                "/tmp/yuda-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
+            )
+        );
+        assert!(paths.model.ends_with("model.int8.onnx"));
+        assert!(paths.tokens.ends_with("tokens.txt"));
+        assert_eq!(config.offline.language, "auto");
+        assert!(config.offline.use_itn);
+        assert_eq!(config.offline.num_threads, 2);
+    }
+
+    #[test]
+    fn defaults_use_sense_voice_small_int8_package() {
+        let config = Config::default();
+        assert_eq!(config.offline.model, DEFAULT_OFFLINE_MODEL);
+        assert_eq!(
+            DEFAULT_OFFLINE_MODEL,
+            "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
+        );
+        assert!(config.offline.model.ends_with("-int8-2024-07-17"));
+    }
 
     #[test]
     fn defaults_are_chinese_first_and_round_trip() {

@@ -12,7 +12,8 @@
 双引擎 + 路由：
 
 - **主力**：火山引擎豆包语音识别大模型，流式 WebSocket（中英混输、ITN、自动标点；≈ ¥2.2/小时）。
-- **兜底**：sherpa-onnx + SenseVoice int8（中/英/日/韩/粤，CPU 实时），silero-vad 端点检测，模型首次使用自动下载。
+- **兜底**：sherpa-onnx 的 SenseVoice-Small int8 模型（中/英/日/韩/粤，CPU 实时），silero-vad 端点检测，模型首次使用自动下载。
+- **模型包目录**：`sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17`，由 `src/config.rs` 的默认值统一管理。
 - **模式**：`cloud` / `offline` / `auto`（默认 auto：云端 2 秒连接超时，失败透明切换离线并在 UI 显示「离线」徽标）。
 
 ## 理由

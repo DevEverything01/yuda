@@ -30,12 +30,12 @@
 | 方案 | 类型 | 中文能力 | 成本 | 结论 |
 |---|---|---|---|---|
 | 火山引擎·豆包语音识别大模型（流式 WebSocket） | 云端 | 最强：中英混输、ITN、标点、方言 | ≈ ¥2.2/小时 | **主力引擎**；参考客户端：PyPI `doubao-speech` |
-| sherpa-onnx + SenseVoice int8 | 端侧 | 强：中/英/日/韩/粤，CPU 可实时（RK3588 级） | 免费 | **离线兜底**；模型 `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09` |
+| sherpa-onnx + SenseVoice-Small int8 | 端侧 | 强：中/英/日/韩/粤，CPU 可实时 | 免费 | **离线兜底**；模型包目录 `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17` |
 | FunASR Paraformer（流式中文） | 端侧/自部署 | 强 | 免费 | 备选；生态整合不如 sherpa-onnx 直接 |
 | 阿里 Fun-ASR-Realtime / Qwen-Audio-ASR | 云端 | 强 | 按量 | 备选云端供应商（配置层预留） |
 | Groq Whisper / SiliconFlow SenseVoiceSmall | 云端 | 中/强 | 极低/有免费额度 | 备选；Whisper 系**不采用**为主引擎 |
 
-**决策（ADR 0002）**：混合架构——云端豆包流式为主（准确率上限），SenseVoice 离线兜底（断网/隐私下限），`auto` 模式 2 秒超时自动切换。
+**决策（ADR 0002）**：混合架构——云端豆包流式为主（准确率上限），SenseVoice-Small 离线兜底（断网/隐私下限），`auto` 模式 2 秒超时自动切换。
 
 ## 4. Wayland/Hyprland 文字上屏三条路
 

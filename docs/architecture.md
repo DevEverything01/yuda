@@ -13,7 +13,7 @@ Hyprland 会话（Wayland）
 │      ▼                                        │
 ├─ ASR 路由（cloud / offline / auto）◄──────────┘
 │   ├─ 云端：火山豆包大模型流式 WebSocket（ITN + 标点，部分结果实时渲染）
-│   └─ 离线：sherpa-onnx + SenseVoice int8 + silero-vad（2s 超时自动切换，UI 显示「离线」徽标）
+│   └─ 离线：sherpa-onnx SenseVoice-Small int8（2024-07-17 包）+ silero-vad（2s 超时自动切换，UI 显示「离线」徽标）
 │      ▼ 最终文本（key up 后定稿）
 ├─ LLM 保守纠错（可选，OpenAI 兼容端点，5s 超时 → 放行原文）
 │      ▼
@@ -30,7 +30,7 @@ Hyprland 会话（Wayland）
 | `config` | TOML 配置加载/保存，0600 权限，模型名与 endpoint 的唯一默认值来源 | serde, toml, directories |
 | `hotkey` | evdev 监听、设备热插拔、alone-press 判定、300ms 防抖 | evdev, udev, inotify |
 | `audio` | cpal 采集、rubato 重采样、RMS 电平广播 | cpal, rubato |
-| `asr` | ASR trait + 云端 WS 客户端 + 离线 sherpa 实现 + auto 路由 | tokio, tokio-tungstenite, sherpa-rs |
+| `asr` | ASR trait + 云端 WS 客户端 + 官方 sherpa-onnx SenseVoice-Small 离线实现 + auto 路由 | tokio, tokio-tungstenite, sherpa-onnx |
 | `refine` | LLM 保守纠错（OpenAI 兼容 chat/completions，5s 超时） | reqwest |
 | `inject` | 剪贴板快照/恢复 + Ctrl+V 合成（wtype → ydotool 兜底链） | wl-clipboard, wtype（外部命令） |
 | `ui` | 胶囊悬浮条（波形/状态机/动画）+ 设置窗口 | gtk4, gtk4-layer-shell |

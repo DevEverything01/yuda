@@ -58,6 +58,7 @@ fn print_json(session: &Session) -> Result<()> {
         yuda::app::SessionState::Transcribing => "transcribing",
         yuda::app::SessionState::Refining => "refining",
         yuda::app::SessionState::Ready => "ready",
+        yuda::app::SessionState::Injecting => "injecting",
         yuda::app::SessionState::Error => "error",
         yuda::app::SessionState::Idle => "idle",
     };

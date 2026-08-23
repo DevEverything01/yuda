@@ -2,7 +2,7 @@
 
 ## M0 — 技术验证 spike（1–2 天）
 
-- [ ] sherpa-onnx + SenseVoice int8 在目标 Omarchy 机器上跑通中文识别（实测准确率/延迟/CPU 占用）
+- [ ] sherpa-onnx + SenseVoice-Small int8 在目标 Omarchy 机器上跑通中文识别（实测准确率/延迟/CPU 占用）
 - [ ] 火山引擎豆包流式 ASR WebSocket 连通性（申请 appid/token，跑通双向流式 + 部分结果回调）
 - [ ] evdev 热键监听 + wtype/wl-clipboard 上屏的最小可行性验证
 
@@ -19,7 +19,7 @@
 ## M2 — 产品化（第 3–4 周）
 
 - [ ] 胶囊悬浮条：RMS 波形（5 条、权重 [0.5,0.8,1.0,0.75,0.55]、attack 40%/release 15%、±4% 抖动）、弹性宽度、进出动画
-- [ ] 离线 SenseVoice 兜底 + auto 路由 + 「离线」徽标
+- [ ] 离线 SenseVoice-Small 兜底 + auto 路由 + 「离线」徽标
 - [ ] LLM 保守纠错（可开关，5s 超时放行原文）
 - [ ] GTK4 设置窗口 + 托盘 + Waybar socket
 - [ ] `packaging/PKGBUILD`，净 chroot 构建验证，AUR 发布 `yuda-git`

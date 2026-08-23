@@ -14,9 +14,14 @@ resource_id = "volc.bigasr.sauc.duration"
 connect_timeout_ms = 2000
 
 [offline]
-# sherpa-onnx SenseVoice int8，首次使用自动下载
-model = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09"
+# SenseVoice-Small 的 sherpa-onnx int8 包目录，首次使用时下载到本地
+# 目录内需要有 model.int8.onnx 与 tokens.txt
+# 来源：https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models
+model = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
 model_dir = "~/.local/share/yuda/models"
+language = "auto"           # auto / zh / en / yue / ja / ko
+use_itn = true
+num_threads = 2
 
 [llm]
 enabled = false

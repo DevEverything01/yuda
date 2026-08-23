@@ -27,6 +27,7 @@ impl From<&Session> for UiSnapshot {
             SessionState::Transcribing => ("正在整理", "马上就好", "正在生成可编辑文本"),
             SessionState::Refining => ("智能优化", "让表达更准确", "只修正明显的识别错误"),
             SessionState::Ready => ("准备上屏", "确认后即可使用", "识别结果已保留在剪贴板"),
+            SessionState::Injecting => ("正在上屏", "文字正在送达", "请稍候，马上回到当前窗口"),
             SessionState::Error => ("需要检查", "这次没有完成", "打开设置检查语音引擎"),
         };
         Self {
