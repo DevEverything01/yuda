@@ -53,7 +53,7 @@ fn init_logging() {
 fn run_daemon() -> Result<()> {
     #[cfg(feature = "sensevoice")]
     {
-        return yuda::daemon::run();
+        yuda::daemon::run()
     }
     #[cfg(not(feature = "sensevoice"))]
     {
