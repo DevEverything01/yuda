@@ -59,7 +59,10 @@ impl SenseVoiceRecognizer {
 
     pub fn transcribe_wav(&self, wav_path: impl AsRef<Path>) -> Result<OfflineTranscript> {
         let wav_path = wav_path.as_ref();
-        let wave = Wave::read(wav_path)
+        let wav_path_str = wav_path
+            .to_str()
+            .with_context(|| format!("音频路径不是有效 UTF-8: {}", wav_path.display()))?;
+        let wave = Wave::read(wav_path_str)
             .with_context(|| format!("读取音频失败: {}", wav_path.display()))?;
         if wave.samples().is_empty() {
             bail!("音频为空: {}", wav_path.display());
