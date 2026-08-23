@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>语打 · Yuda</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand" aria-label="语打 Yuda">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>语打 <small>YUDA</small></span>
+      </div>
+      <div class="top-actions">
+        <span class="connection"><b></b> 本地服务已连接</span>
+        <button class="icon-button" id="settingsButton" aria-label="打开设置">⚙</button>
+      </div>
+    </header>
+
+    <section class="hero" aria-labelledby="pageTitle">
+      <div class="hero-copy">
+        <p class="eyebrow">VOICE INPUT / 01</p>
+        <h1 id="pageTitle">把想法，直接说出来。</h1>
+        <p class="lede">中文优先的桌面语音输入。按住右 Ctrl 说话，松手后文字会回到你正在使用的窗口。</p>
+        <div class="quick-stats" aria-label="服务状态">
+          <span><b class="stat-dot violet"></b>云端优先</span>
+          <span><b class="stat-dot mint"></b>自动兜底</span>
+          <span><kbd>右 Ctrl</kbd> 按住说话</span>
+        </div>
+      </div>
+      <div class="hero-orbit" aria-hidden="true">
+        <div class="orbit-ring ring-one"></div>
+        <div class="orbit-ring ring-two"></div>
+        <div class="orbital-core"><span>声</span></div>
+        <div class="orbit-label label-one">中英混输</div>
+        <div class="orbit-label label-two">16 kHz</div>
+        <div class="orbit-label label-three">低延迟</div>
+      </div>
+    </section>
+
+    <section class="workspace" aria-label="语音输入工作区">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">LIVE WORKSPACE</p>
+          <h2>现在就试试</h2>
+        </div>
+        <div class="engine-pill"><span class="pulse"></span><span id="engineLabel">云端优先 · 自动兜底</span></div>
+      </div>
+
+      <div class="input-card" id="inputCard">
+        <div class="card-topline"><span id="stateLabel">READY TO LISTEN</span><span id="timerLabel">00:00</span></div>
+        <div class="waveform" id="waveform" aria-hidden="true">
+          <span style="--h: 22%"></span><span style="--h: 38%"></span><span style="--h: 58%"></span><span style="--h: 42%"></span><span style="--h: 26%"></span><span style="--h: 34%"></span><span style="--h: 20%"></span><span style="--h: 44%"></span><span style="--h: 30%"></span><span style="--h: 18%"></span>
+        </div>
+        <div class="transcript-wrap">
+          <p class="placeholder" id="placeholder">按住下方按钮，开始你的第一句话</p>
+          <textarea id="transcript" aria-label="输入或编辑文字" placeholder="你也可以直接键盘输入……"></textarea>
+          <div class="confidence" id="confidence" hidden><span>识别置信度</span><b><i></i></b><strong>94%</strong></div>
+        </div>
+        <div class="input-actions">
+          <button class="secondary-button" id="clearButton">清空</button>
+          <button class="record-button" id="recordButton"><span class="record-icon">●</span><span id="recordLabel">按住说话</span><small>右 Ctrl</small></button>
+          <button class="submit-button" id="submitButton" aria-label="提交文字">↗</button>
+        </div>
+      </div>
+
+      <div class="flow-note"><span class="flow-line"></span><span id="flowHint">键盘可直接编辑 · 松手自动整理 · 支持中英混输</span><span class="flow-line"></span></div>
+    </section>
+
+    <section class="feature-row" aria-label="产品特性">
+      <article><span class="feature-index">A</span><div><h3>听得懂</h3><p>中文语境优先，技术词汇和中英混输自然保留。</p></div></article>
+      <article><span class="feature-index">B</span><div><h3>接得住</h3><p>云端识别失败时自动切换本地引擎，不让思路中断。</p></div></article>
+      <article><span class="feature-index">C</span><div><h3>不打扰</h3><p>浮窗不抢焦点，最终文字回到你正在使用的地方。</p></div></article>
+    </section>
+  </main>
+
+  <dialog id="settingsDialog">
+    <form method="dialog" class="settings-panel">
+      <div class="dialog-heading"><div><p class="eyebrow">PREFERENCES</p><h2>输入偏好</h2></div><button class="icon-button" value="cancel" aria-label="关闭设置">×</button></div>
+      <label>识别模式<select><option>自动切换</option><option>仅云端</option><option>仅离线</option></select></label>
+      <label>默认语言<select><option>中文（中英混输）</option><option>English</option><option>日本語</option></select></label>
+      <label>唤起按键<input value="KEY_RIGHTCTRL" aria-label="唤起按键"></label>
+      <div class="setting-callout"><span>⌁</span><p><b>隐私提示</b><br>自动模式只在联网时使用云端识别，断网会回退到本地引擎。</p></div>
+      <button class="save-button" value="default">保存设置</button>
+    </form>
+  </dialog>
+  <script src="./app.js"></script>
+</body>
+</html>
