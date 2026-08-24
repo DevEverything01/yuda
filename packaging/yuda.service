@@ -7,6 +7,7 @@ ExecStart=%h/.local/bin/yuda --daemon
 Restart=on-failure
 RestartSec=2
 Environment=RUST_LOG=info
+Environment=WAYLAND_DISPLAY=wayland-1
 
 [Install]
 WantedBy=default.target
