@@ -8,6 +8,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+const MAX_RECORDING_SECONDS: usize = 10 * 60;
+const INITIAL_BUFFER_SECONDS: usize = 5;
+
 #[derive(Debug, Clone)]
 pub struct RecordedAudio {
     pub path: PathBuf,
@@ -16,10 +19,48 @@ pub struct RecordedAudio {
     pub samples: usize,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct PcmBuffer {
     samples: Vec<i16>,
     peak: f32,
+}
+
+impl PcmBuffer {
+    fn with_capacity(sample_rate: u32) -> Self {
+        let capacity = usize::try_from(sample_rate)
+            .ok()
+            .and_then(|rate| rate.checked_mul(INITIAL_BUFFER_SECONDS))
+            .unwrap_or(0);
+        Self {
+            samples: Vec::with_capacity(capacity),
+            peak: 0.0,
+        }
+    }
+
+    fn max_samples(sample_rate: u32) -> Result<usize> {
+        usize::try_from(sample_rate)
+            .ok()
+            .and_then(|rate| rate.checked_mul(MAX_RECORDING_SECONDS))
+            .context("录音采样率导致容量上限溢出")
+    }
+}
+
+#[cfg(test)]
+mod buffer_tests {
+    use super::PcmBuffer;
+
+    #[test]
+    fn max_samples_scales_with_input_rate() {
+        assert_eq!(PcmBuffer::max_samples(16_000).unwrap(), 16_000 * 600);
+    }
+
+    #[test]
+    fn initial_buffer_is_preallocated_without_full_cap() {
+        let buffer = PcmBuffer::with_capacity(16_000);
+        assert_eq!(buffer.samples.len(), 0);
+        assert!(buffer.samples.capacity() >= 16_000 * 5);
+        assert!(buffer.samples.capacity() < 16_000 * 600);
+    }
 }
 
 pub struct AudioRecorder {
@@ -40,43 +81,44 @@ impl AudioRecorder {
             .default_input_config()
             .context("读取默认麦克风配置失败")?;
         let sample_rate = supported.sample_rate().0;
+        let max_samples = PcmBuffer::max_samples(sample_rate)?;
         let channels = usize::from(supported.channels());
         if channels == 0 {
             bail!("默认麦克风报告了 0 个声道");
         }
 
-        let buffer = Arc::new(Mutex::new(PcmBuffer::default()));
+        let buffer = Arc::new(Mutex::new(PcmBuffer::with_capacity(sample_rate)));
         let config = supported.config();
         let stream = match supported.sample_format() {
             cpal::SampleFormat::I8 => {
-                build_stream::<i8>(&device, &config, Arc::clone(&buffer), channels)?
+                build_stream::<i8>(&device, &config, Arc::clone(&buffer), channels, max_samples)?
             }
             cpal::SampleFormat::I16 => {
-                build_stream::<i16>(&device, &config, Arc::clone(&buffer), channels)?
+                build_stream::<i16>(&device, &config, Arc::clone(&buffer), channels, max_samples)?
             }
             cpal::SampleFormat::I32 => {
-                build_stream::<i32>(&device, &config, Arc::clone(&buffer), channels)?
+                build_stream::<i32>(&device, &config, Arc::clone(&buffer), channels, max_samples)?
             }
             cpal::SampleFormat::I64 => {
-                build_stream::<i64>(&device, &config, Arc::clone(&buffer), channels)?
+                build_stream::<i64>(&device, &config, Arc::clone(&buffer), channels, max_samples)?
             }
             cpal::SampleFormat::U8 => {
-                build_stream::<u8>(&device, &config, Arc::clone(&buffer), channels)?
+                build_stream::<u8>(&device, &config, Arc::clone(&buffer), channels, max_samples)?
             }
             cpal::SampleFormat::U16 => {
-                build_stream::<u16>(&device, &config, Arc::clone(&buffer), channels)?
+                build_stream::<u16>(&device, &config, Arc::clone(&buffer), channels, max_samples)?
             }
             cpal::SampleFormat::U32 => {
-                build_stream::<u32>(&device, &config, Arc::clone(&buffer), channels)?
+                build_stream::<u32>(&device, &config, Arc::clone(&buffer), channels, max_samples)?
             }
             cpal::SampleFormat::U64 => {
-                build_stream::<u64>(&device, &config, Arc::clone(&buffer), channels)?
+                build_stream::<u64>(&device, &config, Arc::clone(&buffer), channels, max_samples)?
             }
             cpal::SampleFormat::F32 => {
-                build_stream::<f32>(&device, &config, Arc::clone(&buffer), channels)?
+                build_stream::<f32>(&device, &config, Arc::clone(&buffer), channels, max_samples)?
             }
             cpal::SampleFormat::F64 => {
-                build_stream::<f64>(&device, &config, Arc::clone(&buffer), channels)?
+                build_stream::<f64>(&device, &config, Arc::clone(&buffer), channels, max_samples)?
             }
             format => bail!("不支持的麦克风采样格式: {format:?}"),
         };
@@ -122,6 +164,7 @@ fn build_stream<T>(
     config: &cpal::StreamConfig,
     buffer: Arc<Mutex<PcmBuffer>>,
     channels: usize,
+    max_samples: usize,
 ) -> Result<cpal::Stream>
 where
     T: cpal::SizedSample + cpal::Sample + Send + 'static,
@@ -133,8 +176,12 @@ where
             config,
             move |data: &[T], _| {
                 if let Ok(mut buffer) = buffer.lock() {
+                    if buffer.samples.len() >= max_samples {
+                        return;
+                    }
                     let mut peak = 0.0_f32;
-                    for frame in data.chunks(channels) {
+                    let remaining = max_samples - buffer.samples.len();
+                    for frame in data.chunks(channels).take(remaining) {
                         let mono = frame
                             .iter()
                             .map(|sample| f32::from_sample(*sample))

@@ -7,7 +7,7 @@ ExecStart=%h/.local/bin/yuda --daemon
 Restart=on-failure
 RestartSec=2
 Environment=RUST_LOG=info
-Environment=WAYLAND_DISPLAY=wayland-1
+PassEnvironment=WAYLAND_DISPLAY WAYLAND_SOCKET XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
 
 [Install]
 WantedBy=default.target

@@ -104,7 +104,7 @@ fn handle_recording(
             session.begin_transcribing();
             session.begin_refining();
             let transcript = recognizer.transcribe_wav(&recorded.path);
-            let _ = fs::remove_file(&recorded.path);
+            remove_temporary_wav(&recorded.path);
             let transcript = match transcript {
                 Ok(transcript) if !transcript.text.trim().is_empty() => transcript,
                 Ok(_) => {
@@ -138,6 +138,12 @@ fn handle_recording(
             }
             Ok(())
         }
+    }
+}
+
+fn remove_temporary_wav(path: &std::path::Path) {
+    if let Err(error) = fs::remove_file(path) {
+        tracing::warn!(path = %path.display(), %error, "清理临时录音文件失败");
     }
 }
 

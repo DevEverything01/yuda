@@ -175,8 +175,6 @@ impl HotkeyGate {
                     let _ = output.send(HotkeyAction::Released {
                         held_for: started.elapsed(),
                     });
-                } else {
-                    let _ = output.send(HotkeyAction::Cancelled);
                 }
                 self.pressed_path = None;
             }
@@ -232,6 +230,6 @@ mod tests {
         gate.process(path, Key::KEY_RIGHTCTRL, 0, &tx);
         assert!(matches!(rx.recv().unwrap(), HotkeyAction::Pressed));
         assert!(matches!(rx.recv().unwrap(), HotkeyAction::Cancelled));
-        assert!(matches!(rx.recv().unwrap(), HotkeyAction::Cancelled));
+        assert!(rx.recv_timeout(Duration::from_millis(5)).is_err());
     }
 }
