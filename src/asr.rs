@@ -7,7 +7,7 @@
 use anyhow::{Context, Result};
 use std::{
     sync::{
-        mpsc::{self, Receiver, RecvTimeoutError, Sender},
+        mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError},
         Arc,
     },
     thread,
@@ -182,8 +182,8 @@ impl<F: Fn(Event)> Worker<F> {
 
     /// 等待本会话的 End/Cancel，丢弃中间的音频。
     fn wait_for_end(&mut self, session: u64, rx: &Receiver<Request>) {
-        // End、Cancel、断开或新会话都以 Err 返回。
-        while next_audio(session, rx, &mut self.pending).is_ok() {}
+        // End、Cancel、断开或新会话都会带回结束信号。
+        while drain_audio(session, rx, &mut self.pending).1.is_none() {}
     }
 
     fn run_session(&mut self, session: u64, config: &Config, rx: &Receiver<Request>) {
@@ -253,13 +253,14 @@ impl<F: Fn(Event)> Worker<F> {
         let mut stream = engine.session();
         stream.accept(buffered);
         let interrupt = loop {
+            // 先吃掉队列里已到的全部音频，再解码一次预览：解码慢于音频到达时不会越积越多。
+            let (samples, stop) = drain_audio(session, rx, &mut self.pending);
+            stream.accept(&samples);
+            if let Some(interrupt) = stop {
+                break interrupt;
+            }
             if let Some(text) = stream.partial() {
                 (self.emit)(Event::Partial { session, text });
-            }
-            match next_audio(session, rx, &mut self.pending) {
-                Ok(Some(samples)) => stream.accept(&samples),
-                Ok(None) => {}
-                Err(interrupt) => break interrupt,
             }
         };
         match interrupt {
@@ -299,27 +300,27 @@ impl<F: Fn(Event)> Worker<F> {
         let mut last_text = String::new();
         let mut broken: Option<String> = None;
         let interrupt = loop {
-            match next_audio(session, rx, &mut self.pending) {
-                Ok(Some(samples)) => {
-                    audio.extend_from_slice(&samples);
-                    if broken.is_none() {
-                        let pcm: Vec<i16> = samples
-                            .iter()
-                            .map(|s| (s.clamp(-1.0, 1.0) * 32_767.0) as i16)
-                            .collect();
-                        if let Err(error) = cloud.send_audio(&pcm) {
-                            tracing::warn!(%error, "云端识别中断");
-                            if config.engine == EngineMode::Auto && self.offline.engine.is_some() {
-                                // 立刻切到离线流式，用户继续看到实时预览。
-                                self.run_offline(session, &audio, true, rx);
-                                return;
-                            }
-                            broken = Some(error.to_string());
+            let (samples, stop) = drain_audio(session, rx, &mut self.pending);
+            if !samples.is_empty() {
+                audio.extend_from_slice(&samples);
+                if broken.is_none() {
+                    let pcm: Vec<i16> = samples
+                        .iter()
+                        .map(|s| (s.clamp(-1.0, 1.0) * 32_767.0) as i16)
+                        .collect();
+                    if let Err(error) = cloud.send_audio(&pcm) {
+                        tracing::warn!(%error, "云端识别中断");
+                        if config.engine == EngineMode::Auto && self.offline.engine.is_some() {
+                            // 立刻切到离线流式，用户继续看到实时预览。
+                            self.run_offline(session, &audio, true, rx);
+                            return;
                         }
+                        broken = Some(error.to_string());
                     }
                 }
-                Ok(None) => {}
-                Err(interrupt) => break interrupt,
+            }
+            if let Some(interrupt) = stop {
+                break interrupt;
             }
             if let Some(text) = cloud.latest_text() {
                 if text != last_text {
@@ -357,33 +358,51 @@ impl<F: Fn(Event)> Worker<F> {
     }
 }
 
-/// `Worker::next_request` 的自由函数版本，避免在持有离线模型借用时再借用 `self`。
-fn next_audio(
+/// 取本会话已经到达的全部音频：最多等 100 ms 等来第一条消息，之后把队列里现成的消息一次取完。
+/// 途中遇到 End / Cancel / 断开时一并返回该信号；信号之前的音频照常返回，不能丢。
+/// 自由函数而非方法：调用方此时还借用着离线模型。
+fn drain_audio(
     session: u64,
     rx: &Receiver<Request>,
     pending: &mut Option<Request>,
-) -> Result<Option<Vec<f32>>, Interrupt> {
-    let request = match rx.recv_timeout(Duration::from_millis(100)) {
-        Ok(request) => request,
-        Err(RecvTimeoutError::Timeout) => return Ok(None),
-        Err(RecvTimeoutError::Disconnected) => return Err(Interrupt::Disconnected),
-    };
-    match request {
-        Request::Audio {
-            session: id,
-            samples,
-        } if id == session => Ok(Some(samples)),
-        Request::End { session: id } if id == session => Err(Interrupt::End),
-        Request::Cancel { session: id } if id == session => Err(Interrupt::Cancel),
-        begin @ Request::Begin { .. } => {
-            *pending = Some(begin);
-            Err(Interrupt::Cancel)
+) -> (Vec<f32>, Option<Interrupt>) {
+    let mut audio = Vec::new();
+    let mut first = true;
+    loop {
+        let request = if first {
+            first = false;
+            match rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(request) => request,
+                Err(RecvTimeoutError::Timeout) => return (audio, None),
+                Err(RecvTimeoutError::Disconnected) => {
+                    return (audio, Some(Interrupt::Disconnected))
+                }
+            }
+        } else {
+            match rx.try_recv() {
+                Ok(request) => request,
+                Err(TryRecvError::Empty) => return (audio, None),
+                Err(TryRecvError::Disconnected) => return (audio, Some(Interrupt::Disconnected)),
+            }
+        };
+        match request {
+            Request::Audio {
+                session: id,
+                samples,
+            } if id == session => audio.extend_from_slice(&samples),
+            Request::End { session: id } if id == session => return (audio, Some(Interrupt::End)),
+            Request::Cancel { session: id } if id == session => {
+                return (audio, Some(Interrupt::Cancel))
+            }
+            begin @ Request::Begin { .. } => {
+                // 理论上不会发生（daemon 在会话结束前拒绝新会话）；保险起见放弃当前会话。
+                *pending = Some(begin);
+                return (audio, Some(Interrupt::Cancel));
+            }
+            Request::Reload(config) => *pending = Some(Request::Reload(config)),
+            // 已取消或过期会话的残余消息。
+            _ => {}
         }
-        Request::Reload(config) => {
-            *pending = Some(Request::Reload(config));
-            Ok(None)
-        }
-        _ => Ok(None),
     }
 }
 

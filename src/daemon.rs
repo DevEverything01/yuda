@@ -84,6 +84,8 @@ struct Daemon {
     error_deadline: Option<(Instant, u64)>,
     last_push: Instant,
     duration_ms: u64,
+    /// 松手（结束录音）的时刻，用于记录「松手到上屏」的耗时。
+    released_at: Option<Instant>,
 }
 
 impl Daemon {
@@ -106,6 +108,7 @@ impl Daemon {
             error_deadline: None,
             last_push: Instant::now(),
             duration_ms: 0,
+            released_at: None,
         }
     }
 
@@ -216,6 +219,7 @@ impl Daemon {
 
     fn finish(&mut self, session: u64) {
         self.duration_ms = self.controller.elapsed(Instant::now()).as_millis() as u64;
+        self.released_at = Some(Instant::now());
         self.stop_capture();
         self.asr.end(session);
         self.snapshot.state = State::Transcribing;
@@ -336,7 +340,12 @@ impl Daemon {
                 if !self.controller.advance(session, State::Idle) {
                     return;
                 }
-                tracing::info!(session, backend = backend.label(), "已上屏");
+                let latency_ms = self
+                    .released_at
+                    .take()
+                    .map(|at| at.elapsed().as_millis() as u64)
+                    .unwrap_or_default();
+                tracing::info!(session, backend = backend.label(), latency_ms, "已上屏");
                 if backend == PasteBackend::ClipboardOnly && self.config.injection.auto_paste {
                     notify("语打", "无法模拟粘贴，结果已复制到剪贴板，按 Super+V 粘贴");
                 }

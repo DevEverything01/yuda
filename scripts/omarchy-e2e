@@ -25,7 +25,8 @@ build=1
 [[ ${1:-} == "--no-build" ]] && build=0
 
 vm() { scripts/omarchy-vm "$@"; }
-# 在 VM 的桌面会话里执行一段 bash（脚本走 stdin）。
+# 在 VM 的桌面会话里执行一段 bash（脚本走 stdin）。会自行转入后台的命令（wl-copy、
+# setsid）必须重定向输出，否则 SSH 会一直等它们关闭继承来的 stdout。
 gs() { vm ssh '~/.local/bin/yuda-e2e-session bash -s' <<<"$1"; }
 log() { printf '\n\e[1m== %s\e[0m\n' "$*"; }
 
@@ -60,7 +61,7 @@ if gs '[[ $(omarchy-default-dictation) == yuda ]]'; then
 else
     fail setup "Omarchy 默认听写后端不是 yuda"
 fi
-if gs 'hyprctl binds -j | jq -e "[.[] | select(.arg | test(\"omarchy-dictation\"))] | length >= 5" >/dev/null'; then
+if gs 'hyprctl binds -j | jq -e "[.[] | select(.description | test(\"dictation\"))] | length >= 5" >/dev/null'; then
     pass setup "F9 / Right Alt / Super+Ctrl+X 绑定已加载"
 else
     fail setup "Hyprland 中缺少听写快捷键"
@@ -119,7 +120,7 @@ close_target() { gs "pkill -f -- '$1' || true"; }
 log "A 按住 F9 → foot 终端"
 out=/tmp/yuda-e2e/a.txt
 if open_terminal yuda-e2e-a "$out"; then
-    gs 'printf %s yuda-e2e-sentinel | wl-copy'
+    gs 'printf %s yuda-e2e-sentinel | wl-copy >/dev/null 2>&1'
     before=$(history_count)
     vm hold f9 7.5 &
     hold=$!
@@ -169,7 +170,7 @@ if wait_focus yuda-e2e-b; then
         sleep 0.5
         vm screenshot "$artifacts/b-after.png" >/dev/null
         text=$(gs "cat $out 2>/dev/null")
-        if [[ $text == *"tribal chieftain"* ]]; then
+        if [[ $text == *tribal* && $text == *"50 pieces"* ]]; then
             pass B "GTK 窗口收到：$text"
         else
             fail B "GTK 窗口内容不符：「$text」"
@@ -292,6 +293,19 @@ fi
 gs 'yuda config set-string cloud.access_key ""'
 
 gs 'journalctl --user -u yuda.service --since "-10min" --no-pager -o short-precise' >"$artifacts/daemon.log" 2>&1 || true
+
+log "时延（松手 → 上屏）"
+latencies=$(sed -nE 's/.*已上屏.*latency_ms=([0-9]+).*/\1/p' "$artifacts/daemon.log" | tail -n 4)
+if [[ -z $latencies ]]; then
+    fail latency "日志里没有 latency_ms"
+else
+    worst=$(sort -n <<<"$latencies" | tail -1)
+    if ((worst < 3000)); then
+        pass latency "最近 4 次：$(tr '\n' ' ' <<<"$latencies")ms（上限 3000）"
+    else
+        fail latency "最慢一次 ${worst} ms：$(tr '\n' ' ' <<<"$latencies")"
+    fi
+fi
 log "结果"
 if ((failures == 0)); then
     printf '全部通过。截图与日志：%s\n' "$artifacts"

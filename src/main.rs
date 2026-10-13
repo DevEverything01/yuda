@@ -50,8 +50,11 @@ fn init_logging(daemon: bool) {
     let default = if daemon { "info" } else { "warn" };
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default));
+    // systemd 下 stderr 进 journald：不输出 ANSI 颜色码。
+    let ansi = std::io::IsTerminal::is_terminal(&std::io::stderr());
     tracing_subscriber::fmt()
         .with_env_filter(filter)
+        .with_ansi(ansi)
         .with_writer(std::io::stderr)
         .with_target(false)
         .init();

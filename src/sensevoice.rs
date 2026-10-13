@@ -141,6 +141,7 @@ impl SenseVoice {
             committed: String::new(),
             tail_start: 0,
             last_partial: None,
+            last_decode: Duration::ZERO,
             partial_text: String::new(),
         }
     }
@@ -157,6 +158,8 @@ pub struct StreamingSession<'a> {
     /// 尚未固定的尾段起点（样本下标）。
     tail_start: usize,
     last_partial: Option<Instant>,
+    /// 上一次预览解码的耗时；刷新间隔至少是它的两倍，慢机器上不会被预览拖垮。
+    last_decode: Duration,
     partial_text: String,
 }
 
@@ -191,13 +194,15 @@ impl StreamingSession<'_> {
 
     /// 返回新的预览文本；与上次相同或还没到刷新时间时返回 None。
     pub fn partial(&mut self) -> Option<String> {
+        let interval = PARTIAL_INTERVAL.max(self.last_decode * 2);
         if self
             .last_partial
-            .is_some_and(|last| last.elapsed() < PARTIAL_INTERVAL)
+            .is_some_and(|last| last.elapsed() < interval)
         {
             return None;
         }
-        self.last_partial = Some(Instant::now());
+        let started = Instant::now();
+        self.last_partial = Some(started);
         let tail = &self.audio[self.tail_start.min(self.audio.len())..];
         let text = if self.vad.is_some() {
             if tail.len() >= MIN_TAIL_SAMPLES {
@@ -211,6 +216,7 @@ impl StreamingSession<'_> {
         } else {
             return None;
         };
+        self.last_decode = started.elapsed();
         if text == self.partial_text || text.is_empty() {
             return None;
         }
