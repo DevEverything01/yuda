@@ -1,33 +1,60 @@
 [package]
 name = "yuda"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "中文优先的 Wayland 语音输入 daemon"
+rust-version = "1.85"
+description = "语打：Omarchy 上对标豆包输入法的中文语音输入"
 license = "MIT"
 
 [features]
 default = []
-# Enables the official sherpa-onnx native runtime for SenseVoice-Small.
+# 麦克风采集（cpal → PipeWire/ALSA）。
+audio = ["dep:cpal"]
+# 独立模式的 evdev 全局热键（Omarchy 模式不需要）。
+evdev = ["dep:evdev"]
+# 官方 sherpa-onnx 原生运行时：SenseVoice-Small + Silero VAD。
 sensevoice = ["dep:sherpa-onnx"]
-# Enables the Linux input/audio runtime used by the daemon.
-linux-runtime = ["dep:cpal", "dep:evdev"]
-daemon = ["linux-runtime", "sensevoice"]
+# 火山引擎豆包大模型流式识别（同步 WebSocket + rustls）。
+cloud = ["dep:tungstenite", "dep:rustls", "dep:webpki-roots", "dep:flate2", "dep:uuid"]
+# OpenAI 兼容端点的保守纠错。
+llm = ["dep:ureq"]
+# 兼容旧名称：hosted CI 的 Linux 运行时门。
+linux-runtime = ["audio", "evdev"]
+# 完整 daemon。
+daemon = ["audio", "evdev", "sensevoice", "cloud", "llm"]
 
 [dependencies]
 anyhow = "1"
-chrono = { version = "0.4", features = ["clock"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 cpal = { version = "0.15", optional = true }
 evdev = { version = "0.12", optional = true }
+flate2 = { version = "1", optional = true }
+rustls = { version = "0.23", optional = true, default-features = false, features = ["ring", "std", "tls12"] }
 sherpa-onnx = { version = "1.13.5", optional = true, default-features = false, features = ["static"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 toml = "0.8"
+toml_edit = "0.22"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tungstenite = { version = "0.30", optional = true, features = ["rustls-tls-webpki-roots"] }
+ureq = { version = "3", optional = true, features = ["json"] }
+uuid = { version = "1", optional = true, features = ["v4"] }
+webpki-roots = { version = "1", optional = true }
+
 [dev-dependencies]
 tempfile = "3"
 
 [[test]]
+name = "cloud_protocol"
+required-features = ["cloud"]
+
+[[test]]
 name = "asr_accuracy"
-required-features = ["daemon"]
+required-features = ["sensevoice"]
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = true

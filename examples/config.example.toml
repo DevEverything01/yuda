@@ -1,35 +1,57 @@
-# 语打 Yuda 示例配置 — 复制到 ~/.config/yuda/config.toml 后填写真实值
-# 配置文件权限必须为 0600（安装器会自动设置）
+# 语打 Yuda 配置 —— ~/.config/yuda/config.toml（权限 0600，安装与升级不会覆盖）
+# 修改后运行 `yuda reload`，或在 Omarchy 菜单 Setup › Yuda 语打 中切换。
 
-engine = "auto"            # cloud / offline / auto
-language = "zh"            # zh / en / yue / ja / ko
-hotkey = "KEY_RIGHTCTRL"   # evdev 键名；Fn 仅当硬件对 evdev 可见时可用
+engine = "auto"     # auto：云端优先，2 秒连不上自动用离线；cloud：只用云端；offline：只用离线
+language = "zh"     # zh 中文（中英混输）/ en / yue 粤语 / ja / ko
+
+[trigger]
+# omarchy：由 Omarchy 听写快捷键驱动（按住 Right Alt 或 F9，Super+Ctrl+X 切换），无需 input 组。
+# evdev：语打自己监听按键（非 Omarchy 的 Hyprland），需要 `sudo usermod -aG input $USER` 后重新登录。
+source = "omarchy"
+evdev_key = "KEY_RIGHTCTRL"   # 仅 evdev 模式使用；evdev 键名，例如 KEY_RIGHTALT、KEY_F9
+min_hold_ms = 300             # 按住短于此时长视为误触
+max_recording_secs = 300      # 单次录音上限
 
 [cloud]
-# 火山引擎·豆包语音识别大模型（流式）。控制台申请：https://www.volcengine.com/product/asr
-app_id = "your-volc-app-id"
-access_token = "your-volc-access-token"
-endpoint = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
-resource_id = "volc.bigasr.sauc.duration"
+# 火山引擎 · 豆包语音识别大模型（与豆包输入法同款），约 ¥2.2/小时。
+# 控制台：https://console.volcengine.com/speech/app
+# 旧版控制台：app_key 填 APP ID，access_key 填 Access Token。
+# 新版控制台只有一个 API Key：app_key 留空，access_key 填 API Key。
+app_key = ""
+access_key = ""
+resource_id = "volc.bigasr.sauc.duration"   # 并发版用 volc.bigasr.sauc.concurrent
+endpoint = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
 connect_timeout_ms = 2000
 
 [offline]
-# SenseVoice-Small 的 sherpa-onnx int8 包目录，首次使用时下载到本地
-# 目录内需要有 model.int8.onnx 与 tokens.txt
-# 来源：https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models
-model = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
+# 本地离线模型（omarchy-install-dictation-yuda 自动下载并校验）
 model_dir = "~/.local/share/yuda/models"
-language = "auto"           # auto / zh / en / yue / ja / ko
-use_itn = true
+model = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
+vad_model = "silero_vad.onnx"   # 边说边出字所需；缺失时退化为松手后整段识别
 num_threads = 2
+use_itn = true                  # 数字规整：「下午五点」→「下午5点」
+
+[text]
+remove_fillers = true           # 去掉「嗯、呃」等语气词（不影响「额外」「好啊」）
+hotwords = []                   # 云端热词，例如 ["Omarchy", "Hyprland"]
+
+[text.replacements]
+# 个人词库：识别结果中左边的文本替换为右边
+# "配森" = "Python"
+# "杰森" = "JSON"
 
 [llm]
+# AI 纠错：只修同音字与被误识别成中文的英文术语，绝不改写；超时直接上屏原文。
 enabled = false
-api_base = "https://api.openai.com/v1"   # 任意 OpenAI 兼容端点
-api_key = ""                             # 支持完全留空
+api_base = ""                   # 任意 OpenAI 兼容端点，例如 https://api.openai.com/v1
+api_key = ""                    # 可以留空
 model = "gpt-4o-mini"
 timeout_ms = 5000
 
 [injection]
-paste_delay_ms = 120
-# 兜底链：wtype → ydotool；二者都缺失时仅复制到剪贴板并通知
+paste_delay_ms = 200            # 粘贴后等待目标应用读取剪贴板，再恢复原剪贴板
+auto_paste = true               # false：只复制到剪贴板，不模拟粘贴
+
+[history]
+enabled = true                  # 本机 ~/.local/state/yuda/history.jsonl（0600），用于「重新上屏」
+max_entries = 200

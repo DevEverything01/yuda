@@ -26,3 +26,6 @@ config.local.toml
 # ASR 准确性评估：语料音频与报告不进仓库，只提交 corpus.toml 清单（见 evals/AGENTS.md）
 /evals/asr/corpus/
 /evals/asr/reports/
+
+# Claude Code 本地状态与子代理 worktree
+/.claude/

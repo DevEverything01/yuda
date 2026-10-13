@@ -1,4 +1,4 @@
-#![cfg(feature = "daemon")]
+#![cfg(feature = "sensevoice")]
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -11,7 +11,10 @@ use std::{
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
 use serde::Deserialize;
-use yuda::{config::Config, offline_asr::SenseVoiceRecognizer};
+use yuda::{
+    config::{Config, Language},
+    sensevoice::SenseVoice,
+};
 
 const DEFAULT_MAX_CER: f64 = 0.15;
 const REQUIRED_SCENARIOS: [&str; 3] = ["coding", "chat", "email"];
@@ -92,9 +95,9 @@ fn run_accuracy_eval() -> Result<()> {
 
     let mut rows = Vec::new();
     for (language, samples) in by_language {
-        config.offline.language = language;
-        let recognizer = SenseVoiceRecognizer::from_config(&config)
-            .context("按语料语言初始化 SenseVoice 失败")?;
+        // 语料里的 auto 与 zh 都对应「中文（中英混输）」。
+        config.language = language.parse::<Language>().unwrap_or_default();
+        let recognizer = SenseVoice::load(&config).context("按语料语言初始化 SenseVoice 失败")?;
         for sample in samples {
             let path = resolve_sample_path(manifest_dir, &sample.file)?;
             if !path.is_file() {
@@ -106,7 +109,7 @@ fn run_accuracy_eval() -> Result<()> {
             let result = recognizer.transcribe_wav(&path);
             match result {
                 Ok(transcript) => {
-                    let actual = transcript.text.trim().to_owned();
+                    let actual = transcript.trim().to_owned();
                     let cer = character_error_rate(&reference, &actual);
                     rows.push(EvalRow {
                         sample,

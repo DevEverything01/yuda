@@ -41,10 +41,11 @@ impl HotkeyListener {
 }
 
 fn parse_key(name: &str) -> Result<Key> {
-    match name {
-        "KEY_RIGHTCTRL" => Ok(Key::KEY_RIGHTCTRL),
-        "KEY_LEFTCTRL" => Ok(Key::KEY_LEFTCTRL),
-        _ => bail!("暂不支持热键 {name}；当前支持 KEY_RIGHTCTRL / KEY_LEFTCTRL"),
+    match name.parse::<Key>() {
+        Ok(key) => Ok(key),
+        Err(_) => bail!(
+            "无法识别的按键 {name}；使用 evdev 键名，例如 KEY_RIGHTCTRL、KEY_RIGHTALT、KEY_F9"
+        ),
     }
 }
 
