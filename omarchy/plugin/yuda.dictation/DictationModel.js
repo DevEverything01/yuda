@@ -25,6 +25,14 @@ var PLACEHOLDERS = {
   injecting: "上屏中…"
 }
 
+// 修改上一段（Shift+F9）时的提示语。
+var EDIT_PLACEHOLDERS = {
+  recording: "说出修改，例如「把九点改成十点」",
+  transcribing: "理解修改…",
+  refining: "AI 修改中…",
+  injecting: "修改中…"
+}
+
 var ENGINE_LABELS = { cloud: "云端", offline: "离线" }
 var LANGUAGE_LABELS = { zh: "中文", en: "英文", yue: "粤语", ja: "日语", ko: "韩语" }
 
@@ -44,7 +52,8 @@ function idleSnapshot() {
     fallback: false,
     language: "",
     message: "",
-    elapsedMs: 0
+    elapsedMs: 0,
+    mode: "dictate"
   }
 }
 
@@ -75,7 +84,8 @@ function parseSnapshot(line) {
     fallback: data.fallback === true,
     language: typeof data.language === "string" ? data.language : "",
     message: typeof data.message === "string" ? data.message : "",
-    elapsedMs: isFinite(elapsed) && elapsed > 0 ? elapsed : 0
+    elapsedMs: isFinite(elapsed) && elapsed > 0 ? elapsed : 0,
+    mode: data.mode === "edit" ? "edit" : "dictate"
   }
 }
 
@@ -88,14 +98,23 @@ function singleLine(text) {
 }
 
 // The text the capsule shows, and whether it is a placeholder.
-function capsuleText(state, text, message) {
+function capsuleText(state, text, message, mode) {
   if (state === "error") {
     var error = singleLine(message)
     return { text: error || "出错了", placeholder: false }
   }
   var live = singleLine(text)
   if (live) return { text: live, placeholder: false }
-  return { text: PLACEHOLDERS[state] || "", placeholder: true }
+  var placeholders = mode === "edit" ? EDIT_PLACEHOLDERS : PLACEHOLDERS
+  return { text: placeholders[state] || "", placeholder: true }
+}
+
+// 胶囊右侧徽标：修改模式与离线降级，可同时出现。
+function badgeText(mode, fallback) {
+  var parts = []
+  if (mode === "edit") parts.push("修改")
+  if (fallback) parts.push("离线")
+  return parts.join(" · ")
 }
 
 function engineLabel(engine) {

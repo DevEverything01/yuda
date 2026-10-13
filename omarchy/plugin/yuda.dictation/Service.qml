@@ -37,6 +37,7 @@ Item {
   property string language: ""
   property string message: ""
   property int elapsedMs: 0
+  property string mode: "dictate"
 
   property int retryMs: minRetryMs
   property bool versionWarned: false
@@ -51,6 +52,7 @@ Item {
     language = snapshot.language
     message = snapshot.message
     elapsedMs = snapshot.elapsedMs
+    mode = snapshot.mode
   }
 
   function handleLine(line) {
@@ -125,6 +127,7 @@ Item {
       language: language,
       message: message,
       elapsed_ms: elapsedMs,
+      mode: mode,
       retryScheduled: retryTimer.running,
       nextRetryMs: retryMs
     })

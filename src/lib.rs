@@ -4,6 +4,7 @@
 //! 任意平台可测；音频、识别引擎与热键由 feature 打开。
 
 pub mod config;
+pub mod edit;
 pub mod history;
 pub mod injection;
 pub mod ipc;

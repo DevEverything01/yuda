@@ -30,6 +30,11 @@ if [[ -e $plugin_dir || -L $plugin_dir ]]; then
   omarchy-shell -q shell rescanPlugins >/dev/null || true
 fi
 
+shortcuts="$config_home/yuda/shortcuts.lua"
+if [[ -f $shortcuts ]] && head -n 1 "$shortcuts" | grep -q "由 omarchy-install-dictation-yuda 安装并管理"; then
+  rm "$shortcuts"
+fi
+
 if [[ -f $backend_config && $(< "$backend_config") == "yuda" ]]; then
   rm "$backend_config"
 fi

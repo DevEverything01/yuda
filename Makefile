@@ -22,6 +22,7 @@ install:
 	install -dm755 $(DESTDIR)$(PREFIX)/lib/systemd/user
 	sed 's|@BINDIR@|$(BINDIR)|' packaging/yuda.service > $(DESTDIR)$(PREFIX)/lib/systemd/user/yuda.service
 	install -Dm644 examples/config.example.toml $(DESTDIR)$(SHAREDIR)/config.example.toml
+	install -Dm644 omarchy/hypr/shortcuts.lua $(DESTDIR)$(SHAREDIR)/shortcuts.lua
 	if [ -d omarchy/plugin/yuda.dictation ]; then \
 		install -dm755 $(DESTDIR)$(SHAREDIR)/omarchy-plugin; \
 		cp -r omarchy/plugin/yuda.dictation $(DESTDIR)$(SHAREDIR)/omarchy-plugin/; \

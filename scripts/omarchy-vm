@@ -10,7 +10,7 @@
 #   omarchy-vm status                显示运行状态
 #   omarchy-vm ssh [cmd...]          以 omarchy 用户登录或执行命令（stdin 透传）
 #   omarchy-vm qmp '<json>'          发送一条 QMP 命令并打印应答
-#   omarchy-vm hold <qcode> <秒>     通过 QMP 虚拟键盘按住一个键（例如 f9、alt_r）
+#   omarchy-vm hold <qcode> <秒>     通过 QMP 虚拟键盘按住一个键或组合（例如 f9、alt_r、shift+f9）
 #   omarchy-vm tap <qcode>...        通过 QMP 依次轻点按键
 #   omarchy-vm screenshot <file.png> 通过 QMP 截取整屏
 #
@@ -159,10 +159,20 @@ key_event() {
 }
 
 cmd_hold() {
-    (($# == 2)) || die "用法：omarchy-vm hold <qcode> <秒>"
-    key_event "$1" true
+    (($# == 2)) || die "用法：omarchy-vm hold <qcode>[+<qcode>...] <秒>"
+    local -a keys
+    local index
+    IFS=+ read -r -a keys <<<"$1"
+    for index in "${!keys[@]}"; do
+        key_event "${keys[index]}" true
+        sleep 0.05
+    done
     sleep "$2"
-    key_event "$1" false
+    # 先松开最后按下的键（例如 shift+f9 先松 f9）。
+    for ((index = ${#keys[@]} - 1; index >= 0; index--)); do
+        key_event "${keys[index]}" false
+        sleep 0.05
+    done
 }
 
 cmd_tap() {

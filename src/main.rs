@@ -18,6 +18,8 @@ const USAGE: &str = "语打 Yuda · Omarchy 上的中文语音输入
 用法：
   yuda daemon                     启动 daemon（由 systemd 用户服务 yuda.service 调用）
   yuda start | stop | toggle      开始 / 结束 / 切换录音（Omarchy 听写快捷键调用）
+  yuda start --edit | toggle --edit   录一条修改指令，作用于上一段（Shift+F9）
+  yuda edit <指令>                直接修改上一段，例如 yuda edit 把9点改成10点
   yuda cancel                     丢弃当前录音
   yuda status [--json]            查看状态
   yuda watch                      持续打印状态流（调试）
@@ -64,8 +66,15 @@ fn run(args: &[String]) -> Result<ExitCode> {
     let rest = args.get(1..).unwrap_or_default();
     match args.first().map(String::as_str) {
         Some("daemon") => run_daemon(),
+        Some("start") if rest.first().map(String::as_str) == Some("--edit") => {
+            control(Command::StartEdit, true)
+        }
+        Some("toggle") if rest.first().map(String::as_str) == Some("--edit") => {
+            control(Command::ToggleEdit, true)
+        }
         Some("start") => control(Command::Start, true),
         Some("toggle") => control(Command::Toggle, true),
+        Some("edit") => edit(rest),
         Some("stop") => control(Command::Stop, false),
         Some("cancel") => control(Command::Cancel, false),
         Some("reload") => control(Command::Reload, false),
@@ -125,6 +134,25 @@ fn control(command: Command, autostart: bool) -> Result<ExitCode> {
             }
         }
     };
+    if reply.ok {
+        Ok(ExitCode::SUCCESS)
+    } else {
+        eprintln!(
+            "语打：{}",
+            reply
+                .error
+                .unwrap_or_else(|| "daemon 拒绝了请求".to_owned())
+        );
+        Ok(ExitCode::FAILURE)
+    }
+}
+
+fn edit(args: &[String]) -> Result<ExitCode> {
+    let instruction = args.join(" ");
+    if instruction.trim().is_empty() {
+        bail!("用法：yuda edit <指令>，例如 yuda edit 把9点改成10点");
+    }
+    let reply = ipc::edit(&instruction, CONTROL_TIMEOUT)?;
     if reply.ok {
         Ok(ExitCode::SUCCESS)
     } else {

@@ -69,6 +69,50 @@ hl.timer(function()
   hl.dispatch(hl.dsp.send_key_state({ mods = mods, key = "V", state = "up" }))
 end, { timeout = 50, type = "oneshot" })"#;
 
+/// Hyprland 当前聚焦窗口的地址；不在 Hyprland 或取不到时为 None。
+pub fn active_window() -> Option<String> {
+    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE")?;
+    let output = Command::new("hyprctl")
+        .args(["activewindow", "-j"])
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    value
+        .get("address")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+}
+
+/// 删除光标前的 `count` 个字符（语音修改先删掉上一段，再粘贴改好的版本）。
+pub fn delete_chars(count: usize) -> Result<()> {
+    if count == 0 {
+        return Ok(());
+    }
+    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
+        let lua = format!(
+            r#"for _ = 1, {count} do
+  hl.dispatch(hl.dsp.send_key_state({{ mods = "", key = "BackSpace", state = "down" }}))
+  hl.dispatch(hl.dsp.send_key_state({{ mods = "", key = "BackSpace", state = "up" }}))
+end"#
+        );
+        if run_quietly("hyprctl", &["eval", &lua]) {
+            return Ok(());
+        }
+    }
+    let mut args = Vec::with_capacity(count * 2);
+    for _ in 0..count {
+        args.extend(["-k", "BackSpace"]);
+    }
+    if run_quietly("wtype", &args) {
+        return Ok(());
+    }
+    bail!("无法模拟退格键：需要 Hyprland 或 wtype")
+}
+
 #[derive(Debug)]
 struct ClipboardSnapshot {
     mime: String,

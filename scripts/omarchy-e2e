@@ -14,6 +14,11 @@
 #   D  轻点 F9（<300ms） → 不识别、不上屏
 #   E  按住但不说话      → 「没有识别到语音」，不上屏
 #   F  云端密钥无效      → 自动降级离线（浮层显示「离线」），照常上屏
+#   G  按住 Shift+F9 说「把九点改成十点」 → 上一段被改写
+#   H  Super+Ctrl+Shift+X 说「删掉上一句」 → 上一段被撤回
+#   I  自然语音中英混输  → 英文术语原样保留
+#   J  yuda edit 最后加上问号 → 不经语音直接修改
+# G、H、I 的语音由宿主机上的 edge-tts 生成（需要 uvx 与 ffmpeg）；生成失败时这三项记为 SKIP。
 #
 # 截图与 daemon 日志写入 target/e2e/。
 set -euo pipefail
@@ -49,8 +54,8 @@ if ((build)); then
         vm ssh 'rm -rf ~/yuda-e2e && mkdir -p ~/yuda-e2e && tar -xzf - -C ~/yuda-e2e'
     log "构建依赖"
     vm ssh 'echo omarchy | sudo -S -v 2>/dev/null && sudo pacman -Sy --noconfirm --needed rust clang cmake alsa-lib pkgconf >/dev/null'
-    log "构建并安装（PREFIX=/usr/local）"
-    vm ssh 'cd ~/yuda-e2e && cargo build --release --locked --features daemon 2>&1 | tail -1 && echo omarchy | sudo -S -v 2>/dev/null && sudo make install PREFIX=/usr/local >/dev/null'
+    log "构建并安装（PREFIX=/usr，与软件包相同的路径）"
+    vm ssh 'cd ~/yuda-e2e && cargo build --release --locked --features daemon 2>&1 | tail -1 && echo omarchy | sudo -S -v 2>/dev/null && sudo make uninstall PREFIX=/usr/local >/dev/null && sudo make install PREFIX=/usr >/dev/null && systemctl --user daemon-reload'
     log "omarchy-install-dictation-yuda（无人值守）"
     gs 'YUDA_NONINTERACTIVE=1 omarchy-install-dictation-yuda'
 fi
@@ -262,6 +267,153 @@ else
     fail E "foot 窗口没有获得焦点"
 fi
 
+skips=0
+skip() {
+    printf '\e[33mSKIP\e[0m %s %s\n' "$1" "$2"
+    skips=$((skips + 1))
+}
+
+# 生成语音修改与中英混输的测试语音（edge-tts 真人风格合成，只用于功能测试，不用于准确率评估）。
+tts_dir="$artifacts/tts"
+mkdir -p "$tts_dir"
+tts() {
+    local name=$1 voice=$2 text=$3
+    [[ -s $tts_dir/$name.wav ]] && return 0
+    command -v uvx >/dev/null && command -v ffmpeg >/dev/null || return 1
+    uvx --quiet edge-tts --voice "$voice" --text "$text" --write-media "$tts_dir/$name.mp3" >/dev/null 2>&1 &&
+        ffmpeg -loglevel error -y -i "$tts_dir/$name.mp3" -ar 16000 -ac 1 -c:a pcm_s16le "$tts_dir/$name.wav"
+}
+have_tts=1
+tts edit-replace zh-CN-XiaoxiaoNeural "把九点改成十点" || have_tts=0
+tts edit-delete zh-CN-XiaoxiaoNeural "删掉上一句" || have_tts=0
+tts mixed zh-CN-YunxiNeural "我们用Python写一个解析JSON的脚本，下午三点发给你。" || have_tts=0
+if ((have_tts)); then
+    vm ssh 'mkdir -p ~/yuda-e2e-audio'
+    for name in edit-replace edit-delete mixed; do
+        vm ssh "cat > ~/yuda-e2e-audio/$name.wav" <"$tts_dir/$name.wav"
+    done
+fi
+speak_tts() { gs "pw-play --target yuda_e2e_mic \$HOME/yuda-e2e-audio/$1.wav" & }
+
+# dictate_into <标题> <输出文件>：打开终端并听写 zh.wav，不按回车，留给后续修改。
+dictate_into() {
+    open_terminal "$1" "$2" || return 1
+    vm hold f9 7.5 &
+    local hold=$!
+    sleep 0.7
+    speak zh.wav
+    wait "$hold"
+    wait_idle 20
+}
+
+log "G 按住 Shift+F9 → 语音修改「把九点改成十点」"
+out=/tmp/yuda-e2e/g.txt
+if ((!have_tts)); then
+    skip G "没有 edge-tts 语音"
+elif dictate_into yuda-e2e-g "$out"; then
+    vm hold shift+f9 3.5 &
+    hold=$!
+    sleep 0.7
+    speak_tts edit-replace
+    sleep 1.6
+    vm screenshot "$artifacts/g-edit.png" >/dev/null
+    wait "$hold"
+    if wait_idle 20; then
+        vm tap ret
+        sleep 1
+        text=$(gs "cat $out")
+        if [[ $text == 开饭时间早上10点至下午5点。 ]]; then
+            pass G "改写后：$text"
+        else
+            fail G "改写结果不符：「$text」（日志见 daemon.log）"
+        fi
+    else
+        fail G "20 秒内没有回到空闲"
+    fi
+    close_target "cat > $out"
+else
+    fail G "听写原文失败"
+fi
+
+toggle_edit() {
+    vm qmp '{"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":"meta_l"},{"type":"qcode","data":"ctrl"},{"type":"qcode","data":"shift"},{"type":"qcode","data":"x"}],"hold-time":120}}' >/dev/null
+}
+
+log "H Super+Ctrl+Shift+X → 语音修改「删掉上一句」"
+out=/tmp/yuda-e2e/h.txt
+if ((!have_tts)); then
+    skip H "没有 edge-tts 语音"
+elif dictate_into yuda-e2e-h "$out"; then
+    toggle_edit
+    sleep 0.7
+    speak_tts edit-delete
+    sleep 2.5
+    toggle_edit
+    if wait_idle 20; then
+        vm tap ret
+        sleep 1
+        text=$(gs "cat $out")
+        if [[ -z $text ]]; then
+            pass H "上一段已撤回"
+        else
+            fail H "没有撤回：「$text」"
+        fi
+    else
+        fail H "20 秒内没有回到空闲"
+    fi
+    close_target "cat > $out"
+else
+    fail H "听写原文失败"
+fi
+
+log "I 自然语音中英混输"
+out=/tmp/yuda-e2e/i.txt
+if ((!have_tts)); then
+    skip I "没有 edge-tts 语音"
+elif open_terminal yuda-e2e-i "$out"; then
+    vm hold f9 7 &
+    hold=$!
+    sleep 0.7
+    speak_tts mixed
+    wait "$hold"
+    if wait_idle 20; then
+        vm tap ret
+        sleep 1
+        text=$(gs "cat $out")
+        if [[ $text == *Python* && $text == *JSON* ]]; then
+            pass I "终端收到：$text"
+        else
+            fail I "英文术语没有保留：「$text」"
+        fi
+    else
+        fail I "20 秒内没有回到空闲"
+    fi
+    close_target "cat > $out"
+else
+    fail I "foot 窗口没有获得焦点"
+fi
+
+log "J yuda edit 最后加上问号"
+out=/tmp/yuda-e2e/j.txt
+if dictate_into yuda-e2e-j "$out"; then
+    gs 'yuda edit 最后加上问号'
+    if wait_idle 10; then
+        vm tap ret
+        sleep 1
+        text=$(gs "cat $out")
+        if [[ $text == 开饭时间早上9点至下午5点？ ]]; then
+            pass J "修改后：$text"
+        else
+            fail J "修改结果不符：「$text」"
+        fi
+    else
+        fail J "10 秒内没有回到空闲"
+    fi
+    close_target "cat > $out"
+else
+    fail J "听写原文失败"
+fi
+
 log "F 云端密钥无效 → 自动降级离线"
 out=/tmp/yuda-e2e/f.txt
 gs 'yuda config set-string cloud.access_key yuda-e2e-invalid-key'
@@ -313,7 +465,7 @@ else
 fi
 log "结果"
 if ((failures == 0)); then
-    printf '全部通过。截图与日志：%s\n' "$artifacts"
+    printf '全部通过（跳过 %d 项）。截图与日志：%s\n' "$skips" "$artifacts"
 else
     printf '%d 项失败。截图与日志：%s\n' "$failures" "$artifacts"
     exit 1

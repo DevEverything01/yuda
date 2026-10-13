@@ -15,6 +15,8 @@ daemon（`yuda daemon`）、Omarchy 听写适配器（`omarchy-dictation-yuda`�
 | `start` | 一行 `Reply` 后关闭 | 开始录音；已在录音时视为成功（幂等） |
 | `stop` | 一行 `Reply` 后关闭 | 结束录音并识别、上屏；空闲时也返回成功 |
 | `toggle` | 一行 `Reply` 后关闭 | 空闲→开始，录音中→结束 |
+| `start-edit` / `toggle-edit` | 一行 `Reply` 后关闭 | 同 `start` / `toggle`，但这段语音是**修改指令**，作用于上一段上屏的文字（Shift+F9、Super+Ctrl+Shift+X） |
+| `edit <指令>` | 一行 `Reply` 后关闭 | 不经录音，直接把文字指令作用于上一段，例如 `edit 把9点改成10点` |
 | `cancel` | 一行 `Reply` 后关闭 | 丢弃当前录音，不上屏 |
 | `status` | 一行 `Snapshot` 后关闭 | 读取当前状态 |
 | `subscribe` | 先一行 `Snapshot`，之后状态每变化一次推送一行 `Snapshot`，直到客户端断开 | 供 UI 使用 |
@@ -34,7 +36,7 @@ daemon（`yuda daemon`）、Omarchy 听写适配器（`omarchy-dictation-yuda`�
 每行是完整状态快照，UI 直接用最新一行替换旧状态，不需要合并：
 
 ```json
-{"v":1,"state":"recording","level":0.42,"text":"今天下午三点","engine":"offline","fallback":false,"language":"zh","message":"","elapsed_ms":1840}
+{"v":1,"state":"recording","level":0.42,"text":"今天下午三点","engine":"offline","fallback":false,"language":"zh","message":"","elapsed_ms":1840,"mode":"dictate"}
 ```
 
 | 字段 | 类型 | 含义 |
@@ -48,6 +50,7 @@ daemon（`yuda daemon`）、Omarchy 听写适配器（`omarchy-dictation-yuda`�
 | `language` | 字符串 | `zh` / `en` / `yue` / `ja` / `ko` |
 | `message` | 字符串 | `error` 状态的错误说明；其他状态为空 |
 | `elapsed_ms` | 整数 | 本次录音已持续的毫秒数；非录音状态保留最后值 |
+| `mode` | 字符串 | `dictate`（听写）/ `edit`（修改上一段）；旧客户端可忽略 |
 
 推送频率：录音中约 30 Hz（电平驱动波形）；其他状态只在变化时推送。`error` 状态保持 1.5 s 后 daemon 自动推送 `idle`。
 
@@ -62,3 +65,4 @@ idle ──start──► recording ──stop──► transcribing ──► [
 
 - `refining` 只在启用 LLM 纠错时出现；LLM 超时（默认 5 s）直接用原文进入 `injecting`。
 - 一次会话最多上屏一次。
+- 修改会话（`mode = edit`）在 `injecting` 阶段先删除上一段（按字符数退格），再粘贴新版本；只作用于 10 分钟内由语打上屏、且聚焦窗口未改变的文字。

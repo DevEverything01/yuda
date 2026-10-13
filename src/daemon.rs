@@ -25,23 +25,39 @@ use crate::{
     asr,
     audio::Capture,
     config::{Config, EngineMode, TriggerSource},
+    edit::{self, EditError},
     history,
     injection::{self, InjectOptions, PasteBackend},
-    ipc::{self, Command, Engine, Reply, Snapshot, State},
+    ipc::{self, Command, Engine, Mode, Reply, Snapshot, State},
     session::{Action, Controller},
     text,
 };
 
 const ERROR_DISPLAY: Duration = Duration::from_millis(1_500);
 const LEVEL_PUSH_INTERVAL: Duration = Duration::from_millis(30);
+/// 语音修改只作用于这么久以内上屏的文字。
+const EDITABLE_FOR: Duration = Duration::from_secs(600);
 
 enum Msg {
     Request(Command, Sender<String>),
+    /// `edit <指令>`：不经录音直接修改上一段。
+    EditText(String, Sender<String>),
     Subscribe(UnixStream),
     Level(u64, f32),
     Asr(asr::Event),
     Refined(u64, String),
-    Injected(u64, String, Result<PasteBackend, String>),
+    Injected(u64, String, Result<PasteBackend, String>, Option<String>),
+    Rewritten(u64, Result<String, String>),
+    Edited(u64, Option<String>, Result<(), String>),
+}
+
+/// 上一段由语打上屏的文字，语音修改的作用对象。
+#[derive(Debug, Clone)]
+struct LastInjection {
+    text: String,
+    /// 上屏时聚焦窗口的地址；修改前确认焦点仍在这个窗口。
+    window: Option<String>,
+    at: Instant,
 }
 
 pub fn run() -> Result<()> {
@@ -86,6 +102,9 @@ struct Daemon {
     duration_ms: u64,
     /// 松手（结束录音）的时刻，用于记录「松手到上屏」的耗时。
     released_at: Option<Instant>,
+    /// 当前会话是听写还是修改上一段。
+    mode: Mode,
+    last: Option<LastInjection>,
 }
 
 impl Daemon {
@@ -109,6 +128,8 @@ impl Daemon {
             last_push: Instant::now(),
             duration_ms: 0,
             released_at: None,
+            mode: Mode::Dictate,
+            last: None,
         }
     }
 
@@ -141,18 +162,39 @@ impl Daemon {
                 };
                 let _ = reply.send(line);
             }
+            Msg::EditText(instruction, reply) => {
+                let _ = reply.send(reply_line(&self.edit_text(instruction)));
+            }
             Msg::Subscribe(stream) => self.subscribe(stream),
             Msg::Level(session, level) => self.level(session, level),
             Msg::Asr(event) => self.asr_event(event),
             Msg::Refined(session, text) => self.inject(session, text),
-            Msg::Injected(session, text, result) => self.injected(session, &text, result),
+            Msg::Injected(session, text, result, window) => {
+                self.injected(session, &text, result, window)
+            }
+            Msg::Rewritten(session, result) => match result {
+                Ok(text) => match self.last.clone() {
+                    Some(last) => self.replace_last(session, last, Some(text)),
+                    None => self.fail(session, "没有可修改的上一段文字"),
+                },
+                Err(message) => self.fail(session, &format!("AI 修改失败：{message}")),
+            },
+            Msg::Edited(session, text, result) => self.edited(session, text, result),
         }
     }
 
     fn control(&mut self, command: Command) -> Reply {
         let now = Instant::now();
+        let (command, mode) = match command {
+            Command::StartEdit => (Command::Start, Mode::Edit),
+            Command::ToggleEdit => (Command::Toggle, Mode::Edit),
+            other => (other, Mode::Dictate),
+        };
         match self.controller.on_command(command, now) {
-            Action::Begin(session) => self.begin(session, now),
+            Action::Begin(session) => {
+                self.mode = mode;
+                self.begin(session, now)
+            }
             Action::Finish(session) => {
                 self.finish(session);
                 Reply::ok()
@@ -186,6 +228,7 @@ impl Daemon {
                     state: State::Recording,
                     engine: self.expected_engine(),
                     language: self.config.language.as_str().to_owned(),
+                    mode: self.mode,
                     ..Snapshot::default()
                 };
                 self.push();
@@ -277,6 +320,8 @@ impl Daemon {
                         tracing::info!(session, chars = processed.chars().count(), "识别完成");
                         if processed.is_empty() {
                             self.fail(session, "没有识别到语音");
+                        } else if self.mode == Mode::Edit {
+                            let _ = self.apply_instruction(session, processed);
                         } else {
                             self.refine_or_inject(session, processed);
                         }
@@ -322,19 +367,163 @@ impl Daemon {
         self.snapshot.state = State::Injecting;
         self.snapshot.text = text.clone();
         self.push();
-        let options = InjectOptions {
-            paste_delay: Duration::from_millis(self.config.injection.paste_delay_ms),
-            auto_paste: self.config.injection.auto_paste,
-        };
+        let options = self.inject_options();
         let tx = self.tx.clone();
         thread::spawn(move || {
+            let window = injection::active_window();
             let result =
                 injection::inject_text(&text, &options).map_err(|error| format!("{error:#}"));
-            let _ = tx.send(Msg::Injected(session, text, result));
+            let _ = tx.send(Msg::Injected(session, text, result, window));
         });
     }
 
-    fn injected(&mut self, session: u64, text: &str, result: Result<PasteBackend, String>) {
+    fn inject_options(&self) -> InjectOptions {
+        InjectOptions {
+            paste_delay: Duration::from_millis(self.config.injection.paste_delay_ms),
+            auto_paste: self.config.injection.auto_paste,
+        }
+    }
+
+    /// `yuda edit <指令>`：不录音，直接把指令作用于上一段。
+    fn edit_text(&mut self, instruction: String) -> Reply {
+        let instruction = text::process(&instruction, &self.config.text);
+        if instruction.is_empty() {
+            return Reply::error("修改指令为空");
+        }
+        let Some(session) = self.controller.begin_direct(Instant::now()) else {
+            return Reply::error("上一段语音仍在处理，请稍候");
+        };
+        self.error_deadline = None;
+        self.mode = Mode::Edit;
+        self.snapshot = Snapshot {
+            state: State::Transcribing,
+            text: instruction.clone(),
+            language: self.config.language.as_str().to_owned(),
+            mode: Mode::Edit,
+            ..Snapshot::default()
+        };
+        self.push();
+        match self.apply_instruction(session, instruction) {
+            Ok(()) => Reply::ok(),
+            Err(message) => Reply::error(message),
+        }
+    }
+
+    /// 解析修改指令并执行；立即失败时返回错误说明（同时已进入 error 状态）。
+    fn apply_instruction(&mut self, session: u64, instruction: String) -> Result<(), String> {
+        let Some(last) = self
+            .last
+            .clone()
+            .filter(|last| last.at.elapsed() < EDITABLE_FOR)
+        else {
+            let message = "没有可修改的上一段文字（只能修改 10 分钟内由语打上屏的内容）";
+            self.fail(session, message);
+            return Err(message.to_owned());
+        };
+        let op = edit::parse(&instruction);
+        tracing::info!(session, ?op, "语音修改");
+        match edit::apply(&op, &last.text) {
+            Ok(text) => {
+                self.replace_last(session, last, text);
+                Ok(())
+            }
+            Err(EditError::NeedsLlm(_)) if self.config.llm.is_usable() => {
+                self.rewrite_with_llm(session, last.text, instruction);
+                Ok(())
+            }
+            Err(error) => {
+                let message = error.to_string();
+                self.fail(session, &message);
+                Err(message)
+            }
+        }
+    }
+
+    #[cfg(feature = "llm")]
+    fn rewrite_with_llm(&mut self, session: u64, text: String, instruction: String) {
+        if !self.controller.advance(session, State::Refining) {
+            return;
+        }
+        self.snapshot.state = State::Refining;
+        self.snapshot.text = instruction.clone();
+        self.push();
+        let llm = self.config.llm.clone();
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let result = crate::refine::rewrite(&llm, &text, &instruction)
+                .map_err(|error| format!("{error:#}"));
+            let _ = tx.send(Msg::Rewritten(session, result));
+        });
+    }
+
+    #[cfg(not(feature = "llm"))]
+    fn rewrite_with_llm(&mut self, session: u64, _text: String, instruction: String) {
+        self.fail(session, &EditError::NeedsLlm(instruction).to_string());
+    }
+
+    /// 删除上一段并粘贴新版本；`text` 为 None 表示整段撤回。
+    fn replace_last(&mut self, session: u64, last: LastInjection, text: Option<String>) {
+        if !self.controller.advance(session, State::Injecting) {
+            return;
+        }
+        self.snapshot.state = State::Injecting;
+        self.snapshot.text = text.clone().unwrap_or_else(|| "已撤回上一段".to_owned());
+        self.push();
+        let options = self.inject_options();
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let result = (|| -> anyhow::Result<()> {
+                if let (Some(expected), Some(current)) = (&last.window, injection::active_window())
+                {
+                    if expected != &current {
+                        anyhow::bail!("焦点已经离开上一段文字所在的窗口，没有修改");
+                    }
+                }
+                injection::delete_chars(last.text.chars().count())?;
+                if let Some(text) = text.as_deref().filter(|text| !text.trim().is_empty()) {
+                    // 等目标应用处理完退格，再粘贴新版本。
+                    thread::sleep(Duration::from_millis(80));
+                    let backend = injection::inject_text(text, &options)?;
+                    if backend == PasteBackend::ClipboardOnly {
+                        anyhow::bail!("已删除上一段，但无法粘贴新版本；新版本已在剪贴板");
+                    }
+                }
+                Ok(())
+            })()
+            .map_err(|error| format!("{error:#}"));
+            let _ = tx.send(Msg::Edited(session, text, result));
+        });
+    }
+
+    fn edited(&mut self, session: u64, text: Option<String>, result: Result<(), String>) {
+        match result {
+            Ok(()) => {
+                if !self.controller.advance(session, State::Idle) {
+                    return;
+                }
+                tracing::info!(session, deleted_only = text.is_none(), "语音修改完成");
+                let window = self.last.as_ref().and_then(|last| last.window.clone());
+                if let Some(text) = &text {
+                    self.record_history(text);
+                }
+                self.last = text.map(|text| LastInjection {
+                    text,
+                    window,
+                    at: Instant::now(),
+                });
+                self.enter_idle();
+            }
+            Err(message) => self.fail(session, &message),
+        }
+    }
+
+    fn injected(
+        &mut self,
+        session: u64,
+        text: &str,
+        result: Result<PasteBackend, String>,
+        window: Option<String>,
+    ) {
         match result {
             Ok(backend) => {
                 if !self.controller.advance(session, State::Idle) {
@@ -350,6 +539,12 @@ impl Daemon {
                     notify("语打", "无法模拟粘贴，结果已复制到剪贴板，按 Super+V 粘贴");
                 }
                 self.record_history(text);
+                // 只有确实粘贴进窗口的文字才能被语音修改。
+                self.last = (backend != PasteBackend::ClipboardOnly).then(|| LastInjection {
+                    text: text.to_owned(),
+                    window,
+                    at: Instant::now(),
+                });
                 self.enter_idle();
             }
             Err(message) => self.fail(session, &format!("上屏失败：{message}")),
@@ -512,6 +707,16 @@ fn serve(stream: UnixStream, tx: &Sender<Msg>) -> Result<()> {
     let mut line = String::new();
     BufReader::new(stream.try_clone()?).read_line(&mut line)?;
     let mut writer = &stream;
+    if let Some(instruction) = line.trim_end().strip_prefix("edit ") {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        tx.send(Msg::EditText(instruction.to_owned(), reply_tx))
+            .map_err(|_| anyhow::anyhow!("daemon 主循环已退出"))?;
+        let reply = reply_rx
+            .recv_timeout(Duration::from_secs(4))
+            .context("daemon 没有及时回应")?;
+        writer.write_all(reply.as_bytes())?;
+        return Ok(());
+    }
     let command: Command = match line.parse() {
         Ok(command) => command,
         Err(error) => {

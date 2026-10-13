@@ -77,6 +77,18 @@ impl Controller {
         }
     }
 
+    /// 不经录音、直接处理一条文字指令（`yuda edit`）：开一个新会话并跳过录音阶段。
+    /// 忙时返回 None。
+    pub fn begin_direct(&mut self, now: Instant) -> Option<u64> {
+        if !matches!(self.state, State::Idle | State::Error) {
+            return None;
+        }
+        self.session += 1;
+        self.state = State::Transcribing;
+        self.started_at = Some(now);
+        Some(self.session)
+    }
+
     /// 最大录音时长到达时由 daemon 调用，等同于松开按键。
     pub fn on_timeout(&mut self, session: u64) -> Action {
         if session == self.session && self.state == State::Recording {
@@ -271,6 +283,23 @@ mod tests {
         assert_eq!(controller.on_command(Command::Stop, now), Action::Nothing);
         assert_eq!(controller.on_command(Command::Cancel, now), Action::Nothing);
         assert_eq!(controller.state(), State::Idle);
+    }
+
+    #[test]
+    fn direct_instruction_skips_recording_and_respects_busy_state() {
+        let t0 = Instant::now();
+        let mut controller = Controller::new(HOLD);
+        let id = controller
+            .begin_direct(t0)
+            .expect("idle accepts a direct instruction");
+        assert_eq!(controller.state(), State::Transcribing);
+        assert_eq!(
+            controller.begin_direct(t0),
+            None,
+            "busy pipeline must refuse"
+        );
+        assert!(controller.advance(id, State::Injecting));
+        assert!(controller.advance(id, State::Idle));
     }
 
     #[test]

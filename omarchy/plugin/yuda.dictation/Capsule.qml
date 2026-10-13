@@ -33,8 +33,10 @@ PanelWindow {
   readonly property var live: ({
     phase: service ? service.phase : "idle",
     fallback: !!service && service.fallback,
+    badge: Model.badgeText(service ? service.mode : "dictate", !!service && service.fallback),
     content: Model.capsuleText(service ? service.phase : "idle",
-      service ? service.text : "", service ? service.message : "")
+      service ? service.text : "", service ? service.message : "",
+      service ? service.mode : "dictate")
   })
 
   // What the capsule draws. It follows `live` while the capsule is wanted and
@@ -130,7 +132,7 @@ PanelWindow {
     // instead of the pill snapping to a new width.
     property real labelWidth: Math.max(win.minLabelWidth,
       Math.min(win.maxLabelWidth, Math.ceil(labelMetrics.advanceWidth) + Style.space(2)))
-    property real badgeSlot: win.view.fallback ? badge.width + win.gap : 0
+    property real badgeSlot: win.view.badge !== "" ? badge.width + win.gap : 0
 
     Behavior on labelWidth {
       enabled: win.visible
@@ -203,7 +205,7 @@ PanelWindow {
       color: Util.alpha(Commons.Color.accent, 0.16)
       border.width: 1
       border.color: Util.alpha(Commons.Color.accent, 0.55)
-      opacity: win.view.fallback ? 1 : 0
+      opacity: win.view.badge !== "" ? 1 : 0
       visible: opacity > 0
 
       Behavior on opacity {
@@ -214,7 +216,8 @@ PanelWindow {
         id: badgeLabel
         anchors.centerIn: parent
         textFormat: Text.PlainText
-        text: "离线"
+        // view 在退出动画期间冻结，徽标文字不会先变空再淡出。
+        text: win.view.badge
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
         color: Commons.Color.accent

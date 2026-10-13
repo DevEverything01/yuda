@@ -9,7 +9,30 @@ use crate::config::LlmConfig;
 /// PROMPT.md 规定的系统提示词，逐字使用。
 pub const SYSTEM_PROMPT: &str = "You are a speech-to-text correction filter. Only fix obvious speech-recognition errors: Chinese homophone mistakes (e.g. 他/她/它 by context) and English technical terms mistakenly transcribed as Chinese (配森→Python, 杰森→JSON, 吉特→Git). Never rewrite, polish, translate, add or remove content. If the input looks correct, return it exactly as-is. Return only the corrected text, no explanations.";
 
+/// 语音修改的自由指令（「改得正式一点」「翻译成英文」）。
+pub const EDIT_PROMPT: &str = "You edit a short piece of dictated text by following the user's instruction. Apply the instruction to TEXT and return only the resulting text, with no quotes, labels or explanations. Keep everything the instruction does not ask to change, and keep the language of TEXT unless the instruction asks to translate.";
+
 pub fn refine(config: &LlmConfig, text: &str) -> Result<String> {
+    let content = chat(config, SYSTEM_PROMPT, text)?;
+    accept(text, &content).context("LLM 输出偏离原文过多，已使用原文")
+}
+
+/// 按自由指令改写上一段文字；改写是用户明确要求的，不做偏离检查。
+pub fn rewrite(config: &LlmConfig, text: &str, instruction: &str) -> Result<String> {
+    let user = format!("TEXT:\n{text}\n\nINSTRUCTION:\n{instruction}");
+    let content = chat(config, EDIT_PROMPT, &user)?;
+    let content = content
+        .trim()
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    if content.is_empty() {
+        anyhow::bail!("LLM 没有返回改写结果");
+    }
+    Ok(content.to_owned())
+}
+
+fn chat(config: &LlmConfig, system: &str, user: &str) -> Result<String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_millis(config.timeout_ms)))
         .build()
@@ -19,8 +42,8 @@ pub fn refine(config: &LlmConfig, text: &str) -> Result<String> {
         "model": config.model,
         "temperature": 0,
         "messages": [
-            { "role": "system", "content": SYSTEM_PROMPT },
-            { "role": "user", "content": text },
+            { "role": "system", "content": system },
+            { "role": "user", "content": user },
         ],
     });
     let mut request = agent.post(&url);
@@ -32,11 +55,11 @@ pub fn refine(config: &LlmConfig, text: &str) -> Result<String> {
         .body_mut()
         .read_json()
         .context("LLM 返回无法解析")?;
-    let content = value
+    value
         .pointer("/choices/0/message/content")
         .and_then(serde_json::Value::as_str)
-        .context("LLM 返回中没有文本")?;
-    accept(text, content).context("LLM 输出偏离原文过多，已使用原文")
+        .map(str::to_owned)
+        .context("LLM 返回中没有文本")
 }
 
 /// 只接受「看起来像同一句话」的纠错结果。

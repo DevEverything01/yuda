@@ -19,6 +19,9 @@ pub enum Command {
     Start,
     Stop,
     Toggle,
+    /// 开始录一条修改指令，作用于上一段上屏的文字。
+    StartEdit,
+    ToggleEdit,
     Cancel,
     Status,
     Subscribe,
@@ -32,6 +35,8 @@ impl Command {
             Self::Start => "start",
             Self::Stop => "stop",
             Self::Toggle => "toggle",
+            Self::StartEdit => "start-edit",
+            Self::ToggleEdit => "toggle-edit",
             Self::Cancel => "cancel",
             Self::Status => "status",
             Self::Subscribe => "subscribe",
@@ -54,6 +59,8 @@ impl FromStr for Command {
             "start" => Self::Start,
             "stop" => Self::Stop,
             "toggle" => Self::Toggle,
+            "start-edit" => Self::StartEdit,
+            "toggle-edit" => Self::ToggleEdit,
             "cancel" => Self::Cancel,
             "status" => Self::Status,
             "subscribe" => Self::Subscribe,
@@ -128,6 +135,15 @@ impl Engine {
     }
 }
 
+/// 会话类型：听写，或修改上一段。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    #[default]
+    Dictate,
+    Edit,
+}
+
 /// 一行完整状态；UI 用最新一行替换旧状态。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -140,6 +156,8 @@ pub struct Snapshot {
     pub language: String,
     pub message: String,
     pub elapsed_ms: u64,
+    #[serde(default)]
+    pub mode: Mode,
 }
 
 impl Default for Snapshot {
@@ -154,6 +172,7 @@ impl Default for Snapshot {
             language: "zh".to_owned(),
             message: String::new(),
             elapsed_ms: 0,
+            mode: Mode::Dictate,
         }
     }
 }
@@ -197,6 +216,18 @@ fn exchange(command: Command, timeout: Duration) -> Result<String> {
     Ok(line)
 }
 
+/// 直接下发一条修改指令（不经语音识别），作用于上一段上屏的文字。
+pub fn edit(instruction: &str, timeout: Duration) -> Result<Reply> {
+    let instruction = instruction.replace(['\n', '\r'], " ");
+    let mut stream = connect(timeout)?;
+    stream.write_all(format!("edit {}\n", instruction.trim()).as_bytes())?;
+    let mut line = String::new();
+    BufReader::new(stream)
+        .read_line(&mut line)
+        .context("等待 daemon 回应超时")?;
+    serde_json::from_str(&line).with_context(|| format!("无法解析 daemon 回应: {}", line.trim()))
+}
+
 /// 发送控制命令（start/stop/toggle/cancel/reload）。
 pub fn call(command: Command, timeout: Duration) -> Result<Reply> {
     let line = exchange(command, timeout)?;
@@ -229,6 +260,8 @@ mod tests {
             Command::Start,
             Command::Stop,
             Command::Toggle,
+            Command::StartEdit,
+            Command::ToggleEdit,
             Command::Cancel,
             Command::Status,
             Command::Subscribe,
@@ -258,6 +291,7 @@ mod tests {
         assert_eq!(value["fallback"], false);
         assert_eq!(value["text"], "今天下午三点");
         assert_eq!(value["elapsed_ms"], 1840);
+        assert_eq!(value["mode"], "dictate");
         for key in ["level", "language", "message"] {
             assert!(value.get(key).is_some(), "missing {key}");
         }

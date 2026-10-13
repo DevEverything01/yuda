@@ -133,6 +133,13 @@ if [[ -d $plugin_source ]]; then
 fi
 yuda omarchy-menu install
 
+# 附加快捷键（语音修改）：Omarchy 在默认后端为 yuda 时加载 ~/.config/yuda/shortcuts.lua。
+# 用户删掉第一行的管理标记后不再覆盖。
+shortcuts="$config_home/yuda/shortcuts.lua"
+if [[ ! -e $shortcuts ]] || head -n 1 "$shortcuts" | grep -q "由 omarchy-install-dictation-yuda 安装并管理"; then
+  install -Dm644 "$share/shortcuts.lua" "$shortcuts"
+fi
+
 omarchy-dictation-use yuda
 hyprctl reload >/dev/null
 
@@ -142,4 +149,4 @@ else
   yuda doctor || true
 fi
 
-omarchy-notification-send -g 󰍬 "语打已就绪" "按住 Right Alt 或 F9 说话，松开即上屏；Super + Ctrl + X 切换录音。" -t 10000
+omarchy-notification-send -g 󰍬 "语打已就绪" "按住 Right Alt 或 F9 说话，松开即上屏；Super + Ctrl + X 切换录音；按住 Shift + F9 用语音修改上一段。" -t 10000
