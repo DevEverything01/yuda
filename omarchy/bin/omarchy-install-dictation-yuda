@@ -56,6 +56,11 @@ if [[ ! -e $config_home/yuda/config.toml ]]; then
   echo "已写入默认配置（中文中英混输、云端优先自动降级离线）"
 else
   echo "保留已有配置"
+  # 迁移：旧版把中文模型默认设为 SenseVoice；仍是旧默认值时换成中英模型（用户自选的值不动）。
+  if [[ $(yuda config get offline.model 2>/dev/null) == "$multi_model" ]]; then
+    yuda config set-string offline.model "$zh_model"
+    echo "中文离线模型已升级为 zipformer 中英模型（技术名词更准）"
+  fi
 fi
 
 download() {
