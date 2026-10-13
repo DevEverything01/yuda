@@ -25,18 +25,20 @@
 | `config` | 默认值中文优先且由 Omarchy 驱动；示例配置与默认值一致；0600 round-trip；拼错字段报错；`set_value` 保留注释并拒绝无效修改 | 默认 |
 | `ipc` | 命令文本往返；快照字段与 `docs/ipc.md` 一致；回应不含 null | 默认 |
 | `session` | 按住流程只上屏一次；<300 ms 丢弃、=300 ms 接受；切换；忙时拒绝；取消后迟到结果作废；录音上限 | 默认 |
-| `text` | 语气词只删独立成分；句末语气词保留句号；词库最长匹配且不级联；分段拼接；标点合并 | 默认 |
+| `text` | 语气词只删独立成分；句末语气词保留句号；词库最长匹配且不级联；分段拼接；标点合并；逐字母缩写合并；技术名词写法只在中英混输里生效；中英间距两种模式；时间日期规整不误伤「有一点」「写一个」；zipformer 原始输出整体规整 | 默认 |
 | `injection` | 空文本拒绝；Hyprland 粘贴脚本与 Omarchy 通用粘贴一致 | 默认 |
+| `edit` | 替换、删除、撤回、追加（含标点名）、英文指令、自由指令；「九点」匹配「9点」；找不到目标与需要 LLM 的报错；正文里的「把…改成…」不在听写模式解析 | 默认 |
 | `history` | 追加、倒序读取、压缩、0600、跳过坏行 | 默认 |
 | `omarchy` | 菜单块插入出厂文件与用户文件、补逗号、幂等、移除还原、拒绝无法安全修改的文件、JSONC 字符串内容不误删 | 默认 |
 | `audio` | 电平映射与 30 Hz 节奏；跨块重采样长度；立体声下混 | `audio` |
-| `sensevoice` | 静音/底噪低于能量门；缺模型报错 | `sensevoice` |
+| `offline` | 静音/底噪低于能量门 | `sensevoice` |
 | `cloud_asr` | 帧头编码、分包、服务端消息解码、热词、语言映射 | `cloud` |
 | `refine` | 接受小修正、拒绝解释与大幅改写 | `llm` |
 
 ## T2
 
 - `tests/injection_mock.rs`：Hyprland 会话走 `hyprctl eval` 并恢复剪贴板；hyprctl 失败回退 wtype；非 Hyprland 走 wtype → ydotool；全部失败时结果留在剪贴板、不恢复；首次复制失败仍恢复原内容；原剪贴板为空时上屏后清空；仅复制模式不模拟按键。
+- `tests/llm_mock.rs`：逐字系统提示词与模型名；Bearer 鉴权头，空密钥不发；偏离过大的纠错被拒绝；自由指令改写；超时上限。
 - `tests/cloud_protocol.rs`：握手头与 `X-Tt-Logid`；完整请求 JSON；3200 字节分包与递增序号；末包标志与负序号；中间结果；最终结果；错误帧映射；401；连接超时；finish 超时。
 
 ## T3：Omarchy VM 端到端
@@ -51,7 +53,7 @@ scripts/omarchy-vm ssh        # 进入 VM（用户/密码 omarchy）
 scripts/omarchy-vm screenshot /tmp/x.png
 ```
 
-场景（详见脚本头部）：A 按住 F9 → foot 终端；B 按住 Right Alt → GTK4 窗口；C Super+Ctrl+X 切换 → 粤语；D 轻点 F9 不上屏；E 静音不上屏。每个场景断言文本内容、剪贴板恢复与历史条数。
+场景（详见脚本头部）：A 按住 F9 → foot 终端；B 按住 Right Alt → GTK4 窗口；C Super+Ctrl+X 切换 → 粤语（切换语言后使用 SenseVoice）；D 轻点 F9 不上屏；E 静音不上屏；F 无效云端密钥 → 自动离线；G 按住 Shift+F9 说「把九点改成十点」；H Super+Ctrl+Shift+X 说「删掉上一句」；I 自然语音中英混输（技术名词）；J `yuda edit 最后加上问号`；K AI 自由指令（模拟 OpenAI 兼容端点）。另有剪贴板历史、修饰键是否卡住（Herdr 进程数）与松手到上屏时延（< 3 s）三项全局检查。G、H、I 的语音由宿主机 edge-tts 生成，生成失败时记为 SKIP。
 
 最近一次结果（2026-10-14，印度宿主机，Omarchy edge `4.0.0.r6942.gf5006bd`，Hyprland 0.56.2；`makepkg` 构建的 `yuda-git` 软件包经 `pacman -U` 安装）：集成检查 4 项与场景 A–F 全部通过，识别结果未进入 Omarchy 剪贴板历史；松手到上屏 241 / 760 / 235 / 232 ms。另行手工验证：Omarchy 菜单两处条目与勾选状态、`omarchy-menu-select` 切换语言后 daemon 热加载、卸载后重装、Catppuccin Latte 主题下胶囊配色跟随。
 

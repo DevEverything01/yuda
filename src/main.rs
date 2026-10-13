@@ -27,6 +27,7 @@ const USAGE: &str = "语打 Yuda · Omarchy 上的中文语音输入
   yuda history [条数]             最近的识别结果
   yuda paste-last                 重新上屏最近一条结果
   yuda transcribe <文件.wav> [--language 语言]  用离线引擎转写 WAV 文件
+  yuda cloud-test [文件.wav]      用已配置的火山引擎密钥测试豆包云端识别
   yuda config path                配置文件路径
   yuda config get <键>            读取配置，例如 yuda config get engine
   yuda config set <键> <值>       修改配置并保留注释，例如 yuda config set llm.enabled true
@@ -83,6 +84,7 @@ fn run(args: &[String]) -> Result<ExitCode> {
         Some("history") => show_history(rest.first()),
         Some("paste-last") => paste_last(),
         Some("transcribe") => transcribe(rest),
+        Some("cloud-test") => cloud_test(rest.first()),
         Some("config") => config_command(rest),
         Some("menu") => menu(rest.first().map(String::as_str)),
         Some("omarchy-menu") => omarchy_menu(rest.first().map(String::as_str)),
@@ -280,6 +282,68 @@ fn transcribe(args: &[String]) -> Result<ExitCode> {
     );
     println!("{text}");
     Ok(ExitCode::SUCCESS)
+}
+
+/// 用配置里的火山引擎密钥把一段 WAV 送到豆包大模型流式识别，验证云端是否可用。
+#[cfg(all(feature = "cloud", feature = "sensevoice"))]
+fn cloud_test(path: Option<&String>) -> Result<ExitCode> {
+    let config = Config::load_default()?;
+    if !config.cloud.is_configured() {
+        bail!("还没有配置火山引擎密钥：在 ~/.config/yuda/config.toml 的 [cloud] 填写 access_key（以及 app_key）");
+    }
+    let path = match path {
+        Some(path) => std::path::PathBuf::from(path),
+        None => {
+            let mut sample = config.clone();
+            sample.language = Language::Yue;
+            sample
+                .offline_model_paths()
+                .directory
+                .join("test_wavs/zh.wav")
+        }
+    };
+    let path_str = path.to_str().context("音频路径不是有效 UTF-8")?;
+    let wave = sherpa_onnx::Wave::read(path_str)
+        .with_context(|| format!("读取音频失败: {}", path.display()))?;
+    let samples = if wave.sample_rate() == 16_000 {
+        wave.samples().to_vec()
+    } else {
+        sherpa_onnx::LinearResampler::create(wave.sample_rate(), 16_000)
+            .context("创建重采样器失败")?
+            .resample(wave.samples(), true)
+    };
+    let pcm: Vec<i16> = samples
+        .iter()
+        .map(|s| (s.clamp(-1.0, 1.0) * 32_767.0) as i16)
+        .collect();
+    let cloud_config = yuda::asr::cloud_config(&config);
+    println!("端点：{}", cloud_config.endpoint);
+    println!("资源：{}", cloud_config.resource_id);
+    let started = Instant::now();
+    let mut session = yuda::cloud_asr::CloudSession::connect(&cloud_config)?;
+    println!(
+        "握手：{} ms（连接 ID {}）",
+        started.elapsed().as_millis(),
+        session.connect_id()
+    );
+    if let Some(log_id) = session.log_id() {
+        println!("服务端日志 ID：{log_id}");
+    }
+    // 按实时速度发送，与录音时的节奏一致。
+    for chunk in pcm.chunks(1_600) {
+        session.send_audio(chunk)?;
+        thread::sleep(Duration::from_millis(100));
+    }
+    let sent = Instant::now();
+    let text = session.finish(Duration::from_secs(5))?;
+    println!("末包到结果：{} ms", sent.elapsed().as_millis());
+    println!("识别结果：{}", yuda::text::process(&text, &config.text));
+    Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(not(all(feature = "cloud", feature = "sensevoice")))]
+fn cloud_test(_path: Option<&String>) -> Result<ExitCode> {
+    bail!("此构建不含云端引擎；请用 --features daemon 构建")
 }
 
 #[cfg(not(feature = "sensevoice"))]

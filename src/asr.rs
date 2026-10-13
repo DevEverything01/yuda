@@ -408,7 +408,7 @@ fn drain_audio(
 }
 
 #[cfg(feature = "cloud")]
-fn cloud_config(config: &Config) -> crate::cloud_asr::CloudAsrConfig {
+pub fn cloud_config(config: &Config) -> crate::cloud_asr::CloudAsrConfig {
     crate::cloud_asr::CloudAsrConfig {
         endpoint: config.cloud.endpoint.clone(),
         app_key: config.cloud.app_key.clone(),

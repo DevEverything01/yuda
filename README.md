@@ -3,12 +3,13 @@
 **Omarchy 上的中文语音输入：按住说话，松手上屏。** 对标豆包输入法的语音体验，以 Omarchy 原生听写后端的形式接入——快捷键、菜单、顶栏、主题都和 Omarchy 一体。
 
 - 按住 **Right Alt** 或 **F9** 说话，松开即上屏；**Super + Ctrl + X** 切换录音。
+- 说错了？按住 **Shift + F9** 说「把九点改成十点」「删掉上一句」，上一段直接改好。
 - 屏幕底部的录音胶囊实时显示波形和识别中的文字，颜色跟随 Omarchy 主题。
-- 云端用火山引擎豆包语音大模型（与豆包输入法同款）；断网或未配置时自动用本地 SenseVoice 模型，**不联网也能用**。
+- 云端用火山引擎豆包语音大模型（与豆包输入法同款）；断网或未配置时自动用本地中英模型，**不联网也能用**，技术名词（Python、JSON、GitHub）照样识别。
 
-| 录音中（Tokyo Night） | 录音中（Catppuccin Latte） | 云端不可用，自动离线 |
-|---|---|---|
-| ![录音胶囊](docs/images/capsule-tokyo-night.png) | ![浅色主题](docs/images/capsule-catppuccin-latte.png) | ![离线徽标](docs/images/capsule-offline.png) |
+| 录音中（Tokyo Night） | 录音中（Catppuccin Latte） | 语音修改 | 云端不可用，自动离线 |
+|---|---|---|---|
+| ![录音胶囊](docs/images/capsule-tokyo-night.png) | ![浅色主题](docs/images/capsule-catppuccin-latte.png) | ![修改徽标](docs/images/capsule-edit.png) | ![离线徽标](docs/images/capsule-offline.png) |
 
 | Setup › Defaults › Dictation | Setup › Yuda 语打 |
 |---|---|
@@ -23,19 +24,19 @@
 | 按住说话、松手上屏 | ✓ | Omarchy 统一听写快捷键；按住少于 300 ms 视为误触 |
 | 点按切换录音 | ✓ | Super + Ctrl + X，或点击顶栏麦克风 |
 | 边说边出字 | ✓ | 离线：VAD 分句 + 尾段 0.4 s 刷新；云端：流式结果 |
-| 自动标点、数字规整 | ✓ | 「下午五点」→「下午5点。」 |
-| 中英混输 | ✓ | `Python`、`JSON` 等英文原样保留 |
+| 自动标点、数字规整 | ✓ | 「下午三点」→「下午3点」；「有一点」「写一个」不受影响 |
+| 中英混输、技术名词 | ✓ | 实测「我们用Python写一个解析JSON的脚本，下午3点发给你。」；`A P I` 合并为 `API` |
 | 粤语 / English / 日本語 / 한국어 | ✓ | Setup › Yuda 语打 › 识别语言 |
 | 去口语化（嗯、呃） | ✓ | 只删不可能是正文的语气词，「额外」「好啊」不受影响 |
 | 个人词库 | ✓ | `[text.replacements]`，例如 `"配森" = "Python"` |
 | 热词 | ✓ | 云端引擎 `hotwords` |
 | AI 纠错 | ✓ | 任意 OpenAI 兼容端点；只修同音字和误识别的术语，超时直接上屏原文 |
-| 豆包大模型识别 | ◐ | 已按官方协议实现并通过本地协议测试；尚未用真实密钥联调 |
-| 离线识别 | ✓ | SenseVoice-Small int8，本机 CPU；松手到上屏实测 0.23–0.72 秒 |
+| 豆包大模型识别 | ◐ | 按官方协议实现，本地协议测试与 401 降级路径已验证；填入密钥后用 `yuda cloud-test` 一条命令联调 |
+| 离线识别 | ✓ | 中英：zipformer 中英模型；粤日韩：SenseVoice-Small；本机 CPU，松手到上屏实测约 0.25 秒 |
 | 识别历史、重新上屏 | ✓ | 只存本机，`yuda history`、菜单「历史记录 · 重新上屏」 |
 | 终端里也能上屏 | ✓ | 与 Omarchy 的 Super+V 同一路径，终端自动用 Ctrl+Shift+V |
 | 不污染剪贴板 | ✓ | 上屏后恢复原剪贴板；临时内容标记为敏感，不进剪贴板历史 |
-| 语音改写指令（「把 A 改成 B」） | ✗ | 尚未支持 |
+| 语音修改上一段 | ✓ | 按住 Shift + F9：「把 A 改成 B」「删掉 X」「删掉上一句」「最后加上问号」；开启 AI 纠错后支持「改得正式一点」「翻译成英文」 |
 
 ## 安装
 
@@ -57,10 +58,10 @@ omarchy-install-dictation-yuda
 `omarchy-install-dictation-yuda` 会：
 
 1. 写入默认配置 `~/.config/yuda/config.toml`（权限 0600，已有配置不覆盖）；
-2. 下载离线模型 SenseVoice-Small 与 Silero VAD（约 160 MB，sha256 校验）；
+2. 下载离线模型：中英 zipformer（约 130 MB）、粤日韩 SenseVoice-Small（约 160 MB）与 Silero VAD，全部 sha256 校验；
 3. 询问是否填写火山引擎密钥（可跳过）；
 4. 启用 `yuda.service`；
-5. 安装录音浮层插件 `yuda.dictation` 并合并 Omarchy 菜单条目；
+5. 安装录音浮层插件 `yuda.dictation`、合并 Omarchy 菜单条目，并安装语音修改快捷键 `~/.config/yuda/shortcuts.lua`；
 6. 把 Omarchy 默认听写后端切换为语打。
 
 之后也可以在 Omarchy 菜单 **Setup › Defaults › Dictation** 里在 Superwhisper、Voxtype 和 **Yuda 语打** 之间切换。
@@ -72,7 +73,23 @@ omarchy-install-dictation-yuda
 | 按住 Right Alt 或 F9 | 录音；松开后识别并上屏 |
 | Super + Ctrl + X | 开始 / 结束录音 |
 | 点击顶栏麦克风 | 同上 |
+| 按住 Shift + F9 | 说一条修改指令，作用于上一段（见下） |
+| Super + Ctrl + Shift + X | 开始 / 结束修改指令 |
 | Setup › Yuda 语打 › 历史记录 | 选一条重新上屏 |
+
+### 语音修改
+
+上一段文字上屏后（10 分钟内、焦点还在同一个窗口），按住 **Shift + F9** 说：
+
+| 说 | 效果 |
+|---|---|
+| 把九点改成十点 / 把张三换成李四 | 替换（「九点」能匹配识别出的「9点」） |
+| 删掉「其实」 / 把其实删掉 | 删除词语 |
+| 删掉上一句 / 撤销 | 撤回整段 |
+| 最后加上问号 / 开头加上你好 | 追加（「句号」「逗号」「问号」自动变成标点） |
+| 改得正式一点 / 翻译成英文 | 开启 AI 纠错后交给 LLM 改写 |
+
+语打会删掉上一段（按字符数退格），再粘贴改好的版本，可以连续修改。命令行等价：`yuda edit 把9点改成10点`。
 
 在 Right Alt 是 AltGr 的键盘布局上，用 F9。
 
@@ -81,7 +98,7 @@ omarchy-install-dictation-yuda
 Omarchy 菜单 **Setup › Yuda 语打**：
 
 - **识别引擎**：自动（云端优先，2 秒连不上用离线）/ 云端 / 离线
-- **识别语言**：中文（中英混输）/ English / 粤语 / 日本語 / 한국어
+- **识别语言**：中文（中英混输）/ English / 粤语 / 日本語 / 한국어（粤日韩自动切换到 SenseVoice 模型）
 - **去除语气词**、**AI 纠错**：开关
 - **编辑配置**：打开 `~/.config/yuda/config.toml`，所有选项都有中文注释（见 [examples/config.example.toml](examples/config.example.toml)）
 - **重启语打**
@@ -95,6 +112,8 @@ Omarchy 菜单 **Setup › Yuda 语打**：
 3. `resource_id` 默认 `volc.bigasr.sauc.duration`（小时版）；并发版改为 `volc.bigasr.sauc.concurrent`。
 
 计费按识别时长，参考价约 ¥2.2/小时，以火山引擎官网为准。没有密钥时语打始终使用离线模型。
+
+填好后运行 `yuda cloud-test` 验证：它把一段测试语音按实时速度送到豆包大模型，打印握手耗时、服务端日志 ID 与识别结果；密钥错误时会显示 HTTP 401 和日志 ID，便于在火山引擎控制台排查。
 
 ## 隐私
 

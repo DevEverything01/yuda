@@ -51,6 +51,10 @@ name = "cloud_protocol"
 required-features = ["cloud"]
 
 [[test]]
+name = "llm_mock"
+required-features = ["llm"]
+
+[[test]]
 name = "asr_accuracy"
 required-features = ["sensevoice"]
 

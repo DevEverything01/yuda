@@ -4,7 +4,7 @@
 
 - [x] sherpa-onnx + SenseVoice-Small int8 在 Omarchy 上跑通（中/英/粤测试语音；5.6 秒中文约 0.36 秒出结果）
 - [x] 火山引擎豆包大模型流式协议：按官方文档与官方 demo 实现，mock 服务器覆盖全部帧类型；TLS 握手与 401 映射用占位密钥实测
-- [ ] 火山引擎真实密钥联调（流式结果、热词、末包）
+- [ ] 火山引擎真实密钥联调（流式结果、热词、末包）——`yuda cloud-test` 已就绪，等密钥
 - [x] 上屏可行性：Hyprland `send_key_state` / wtype / wl-clipboard
 
 ## M1 — Omarchy 原生骨架
@@ -27,7 +27,8 @@
 - [x] `packaging/PKGBUILD`：makepkg 构建（含 check）+ pacman -U 安装 + 端到端验收已在 Omarchy VM 通过
 - [ ] 净 chroot（`extra-x86_64-build`）构建，发布 AUR `yuda-git`
 - [ ] 演示 GIF
-- [ ] 语音改写指令（「把 A 改成 B」「删掉上一句」）
+- [x] 语音修改上一段：Shift+F9 说「把 A 改成 B」「删掉上一句」「最后加上问号」，AI 自由指令（协议见 docs/ipc.md）
+- [x] 中英离线模型换用 zipformer，技术名词与时间数字规整（ADR 0009）
 - [ ] 真人语料准确性评估（coding / chat / email）
 
 ## M3 — 键盘一体化（预研）

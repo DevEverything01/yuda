@@ -18,6 +18,7 @@
 #   H  Super+Ctrl+Shift+X 说「删掉上一句」 → 上一段被撤回
 #   I  自然语音中英混输  → 英文术语原样保留
 #   J  yuda edit 最后加上问号 → 不经语音直接修改
+#   K  yuda edit 翻译成英文（AI 自由指令，模拟的 OpenAI 兼容端点）→ 上一段被改写
 # G、H、I 的语音由宿主机上的 edge-tts 生成（需要 uvx 与 ffmpeg）；生成失败时这三项记为 SKIP。
 #
 # 截图与 daemon 日志写入 target/e2e/。
@@ -420,6 +421,32 @@ if dictate_into yuda-e2e-j "$out"; then
 else
     fail J "听写原文失败"
 fi
+
+log "K AI 自由指令「翻译成英文」（模拟 LLM 端点）"
+out=/tmp/yuda-e2e/k.txt
+if dictate_into yuda-e2e-k "$out"; then
+    # 听写完成后再开启 LLM，避免听写本身经过纠错。
+    gs 'pkill -f "[m]ock-llm.py"; setsid -f python3 ~/yuda-e2e/scripts/e2e/mock-llm.py 18080 "Opening hours are 9 am to 5 pm." >/dev/null 2>&1
+yuda config set llm.enabled true && yuda config set-string llm.api_base http://127.0.0.1:18080/v1'
+    sleep 1
+    gs 'yuda edit 翻译成英文'
+    if wait_idle 15; then
+        vm tap ret
+        sleep 1
+        text=$(gs "cat $out")
+        if [[ $text == "Opening hours are 9 am to 5 pm." ]]; then
+            pass K "AI 改写后：$text"
+        else
+            fail K "AI 改写结果不符：「$text」"
+        fi
+    else
+        fail K "15 秒内没有回到空闲"
+    fi
+    close_target "cat > $out"
+else
+    fail K "听写原文失败"
+fi
+gs 'yuda config set llm.enabled false && yuda config set-string llm.api_base ""; pkill -f "[m]ock-llm.py"; true'
 
 log "F 云端密钥无效 → 自动降级离线"
 out=/tmp/yuda-e2e/f.txt
