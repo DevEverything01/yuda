@@ -15,13 +15,13 @@ pub const END_MARK: &str = "  // <<< yuda";
 /// 语打的菜单条目（每行一个键，均以逗号结尾；Omarchy 的解析器接受尾逗号）。
 const ENTRIES: &[&str] = &[
     r#""setup.default.dictation.yuda": {"icon":"󰍬","label":"Yuda 语打（中文）","checked":"[[ \"$(omarchy-default-dictation)\" == \"yuda\" ]]","action":"omarchy-default-dictation yuda"},"#,
-    r#""setup.yuda": {"icon":"󰍬","label":"Yuda 语打","title":"语打 · 中文语音输入","when":"command -v yuda >/dev/null"},"#,
+    r#""setup.yuda": {"icon":"󰍬","label":"Yuda 语打","title":"语打 Yuda","when":"command -v yuda >/dev/null"},"#,
     r#""setup.yuda.engine": {"icon":"󰒓","label":"识别引擎","description":"云端豆包大模型 / 离线 SenseVoice / 自动","action":"yuda menu engine"},"#,
     r#""setup.yuda.language": {"icon":"󰗊","label":"识别语言","description":"中文（中英混输）/ English / 粤语 / 日本語 / 한국어","action":"yuda menu language"},"#,
     r#""setup.yuda.fillers": {"icon":"󰗨","label":"去除语气词","checked":"[[ \"$(yuda config get text.remove_fillers)\" == \"true\" ]]","action":"yuda menu fillers"},"#,
     r#""setup.yuda.polish": {"icon":"󰁨","label":"AI 纠错","description":"OpenAI 兼容端点，只修明显识别错误","checked":"[[ \"$(yuda config get llm.enabled)\" == \"true\" ]]","action":"yuda menu polish"},"#,
     r#""setup.yuda.history": {"icon":"󰋚","label":"历史记录 · 重新上屏","action":"yuda menu history"},"#,
-    r#""setup.yuda.config": {"icon":"","label":"编辑配置","action":"omarchy-launch-editor ~/.config/yuda/config.toml"},"#,
+    r#""setup.yuda.config": {"icon":"󰏫","label":"编辑配置","action":"omarchy-launch-editor ~/.config/yuda/config.toml"},"#,
     r#""setup.yuda.restart": {"icon":"󰜉","label":"重启语打","action":"systemctl --user restart yuda.service"},"#,
     r#""remove.dictation": {"when":"omarchy-pkg-present voxtype-bin || omarchy-pkg-present superwhisper-bin || command -v omarchy-remove-dictation-yuda >/dev/null"},"#,
     r#""remove.dictation.yuda": {"icon":"󰍬","label":"Yuda 语打","when":"command -v omarchy-remove-dictation-yuda >/dev/null","action":"omarchy-launch-floating-terminal-with-presentation omarchy-remove-dictation-yuda"},"#,
