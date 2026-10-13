@@ -16,6 +16,8 @@ makedepends=('git' 'rust' 'clang' 'cmake')
 provides=('yuda')
 conflicts=('yuda')
 install=yuda.install
+# makepkg 默认的 LTO 会把 ring 的 C 目标文件编成 LTO 字节码，导致链接失败。
+options=('!lto')
 source=('git+https://github.com/DevEverything01/yuda.git')
 sha256sums=('SKIP')
 
