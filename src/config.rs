@@ -14,8 +14,13 @@ use std::{
 pub const DEFAULT_CLOUD_ENDPOINT: &str =
     "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";
 pub const DEFAULT_CLOUD_RESOURCE_ID: &str = "volc.bigasr.sauc.duration";
-/// 官方 sherpa-onnx SenseVoice-Small int8 包目录，内含 `model.int8.onnx` 与 `tokens.txt`。
-pub const DEFAULT_OFFLINE_MODEL: &str = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17";
+/// 中文 / 英文默认离线模型：官方 sherpa-onnx 的 zipformer transducer 中英模型（带标点，int8）。
+/// 实测技术名词（Python、JSON、GitHub、MacBook）远好于 SenseVoice-Small，速度也更快。
+pub const DEFAULT_OFFLINE_MODEL: &str =
+    "sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03";
+/// 粤语 / 日语 / 韩语使用的多语种离线模型：SenseVoice-Small int8。
+pub const DEFAULT_MULTILINGUAL_MODEL: &str =
+    "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17";
 /// 官方 sherpa-onnx 发布的 Silero VAD 模型文件。
 pub const DEFAULT_VAD_MODEL: &str = "silero_vad.onnx";
 pub const DEFAULT_MODEL_DIR: &str = "~/.local/share/yuda/models";
@@ -200,8 +205,12 @@ pub struct CloudConfig {
 pub struct OfflineConfig {
     #[serde(default = "default_model_dir")]
     pub model_dir: String,
+    /// 中文（中英混输）与英文使用的模型目录名。
     #[serde(default = "default_offline_model")]
     pub model: String,
+    /// 粤语、日语、韩语使用的模型目录名。
+    #[serde(default = "default_multilingual_model")]
+    pub multilingual_model: String,
     #[serde(default = "default_vad_model")]
     pub vad_model: String,
     #[serde(default = "default_offline_num_threads")]
@@ -217,6 +226,15 @@ pub struct TextConfig {
     /// 去掉句首/逗号间独立出现的「嗯、呃、额」等语气词。
     #[serde(default = "default_true")]
     pub remove_fillers: bool,
+    /// 技术名词规范写法：python → Python、json → JSON、mac book → MacBook。
+    #[serde(default = "default_true")]
+    pub fix_term_case: bool,
+    /// 时间与日期写成阿拉伯数字：「下午三点」→「下午3点」，「十月十四号」→「10月14号」。
+    #[serde(default = "default_true")]
+    pub itn: bool,
+    /// 中文与英文、数字之间加空格（「用 Python 写」）；默认不加（「用Python写」）。
+    #[serde(default)]
+    pub cjk_spacing: bool,
     /// 用户词库：识别结果中的左侧文本替换为右侧（例如 "配森" = "Python"）。
     #[serde(default)]
     pub replacements: BTreeMap<String, String>,
@@ -291,6 +309,7 @@ impl Default for OfflineConfig {
         Self {
             model_dir: default_model_dir(),
             model: default_offline_model(),
+            multilingual_model: default_multilingual_model(),
             vad_model: default_vad_model(),
             num_threads: default_offline_num_threads(),
             use_itn: true,
@@ -302,6 +321,9 @@ impl Default for TextConfig {
     fn default() -> Self {
         Self {
             remove_fillers: true,
+            fix_term_case: true,
+            itn: true,
+            cjk_spacing: false,
             replacements: BTreeMap::new(),
             hotwords: Vec::new(),
         }
@@ -405,33 +427,97 @@ impl Config {
         Ok(config_home()?.join("yuda/config.toml"))
     }
 
+    /// 当前语言使用的离线模型。
     pub fn offline_model_paths(&self) -> OfflineModelPaths {
-        OfflineModelPaths::from_config(&self.offline)
+        OfflineModelPaths::for_language(&self.offline, self.language)
     }
 }
 
+/// 离线模型目录与其中的模型文件。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OfflineModelPaths {
     pub directory: PathBuf,
-    pub model: PathBuf,
-    pub tokens: PathBuf,
     pub vad: PathBuf,
 }
 
+/// 按目录里的文件识别出的模型族。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelFiles {
+    /// `model.int8.onnx` + `tokens.txt`
+    SenseVoice { model: PathBuf, tokens: PathBuf },
+    /// `encoder*.onnx` + `decoder*.onnx` + `joiner*.onnx` + `tokens.txt`
+    Transducer {
+        encoder: PathBuf,
+        decoder: PathBuf,
+        joiner: PathBuf,
+        tokens: PathBuf,
+    },
+}
+
+impl Language {
+    /// 粤语、日语、韩语需要多语种模型。
+    pub const fn needs_multilingual_model(self) -> bool {
+        matches!(self, Self::Yue | Self::Ja | Self::Ko)
+    }
+}
+
 impl OfflineModelPaths {
-    pub fn from_config(config: &OfflineConfig) -> Self {
+    pub fn for_language(config: &OfflineConfig, language: Language) -> Self {
         let root = expand_home(&config.model_dir);
-        let directory = root.join(&config.model);
+        let name = if language.needs_multilingual_model() {
+            &config.multilingual_model
+        } else {
+            &config.model
+        };
         Self {
-            model: directory.join("model.int8.onnx"),
-            tokens: directory.join("tokens.txt"),
+            directory: root.join(name),
             vad: root.join(&config.vad_model),
-            directory,
         }
     }
 
+    /// 识别目录里的模型文件；int8 版本优先。
+    pub fn files(&self) -> Result<ModelFiles> {
+        if !self.directory.is_dir() {
+            bail!(
+                "离线模型目录不存在: {}；运行 omarchy-install-dictation-yuda 下载模型",
+                self.directory.display()
+            );
+        }
+        let tokens = self.directory.join("tokens.txt");
+        if !tokens.is_file() {
+            bail!("离线模型缺少 tokens.txt: {}", self.directory.display());
+        }
+        let sense_voice = self.directory.join("model.int8.onnx");
+        if sense_voice.is_file() {
+            return Ok(ModelFiles::SenseVoice {
+                model: sense_voice,
+                tokens,
+            });
+        }
+        let find = |prefix: &str| -> Result<PathBuf> {
+            let mut candidates: Vec<PathBuf> = fs::read_dir(&self.directory)?
+                .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+                .filter(|path| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| name.starts_with(prefix) && name.ends_with(".onnx"))
+                })
+                .collect();
+            candidates.sort_by_key(|path| !path.to_string_lossy().contains("int8"));
+            candidates.into_iter().next().with_context(|| {
+                format!("离线模型缺少 {prefix}*.onnx: {}", self.directory.display())
+            })
+        };
+        Ok(ModelFiles::Transducer {
+            encoder: find("encoder")?,
+            decoder: find("decoder")?,
+            joiner: find("joiner")?,
+            tokens,
+        })
+    }
+
     pub fn is_complete(&self) -> bool {
-        self.model.is_file() && self.tokens.is_file()
+        self.files().is_ok()
     }
 }
 
@@ -589,6 +675,9 @@ fn default_model_dir() -> String {
 fn default_offline_model() -> String {
     DEFAULT_OFFLINE_MODEL.to_owned()
 }
+fn default_multilingual_model() -> String {
+    DEFAULT_MULTILINGUAL_MODEL.to_owned()
+}
 fn default_vad_model() -> String {
     DEFAULT_VAD_MODEL.to_owned()
 }
@@ -626,7 +715,7 @@ mod tests {
     }
 
     #[test]
-    fn offline_paths_point_to_sense_voice_and_vad_files() {
+    fn chinese_and_english_use_the_zipformer_others_use_sense_voice() {
         let mut config = Config::default();
         config.offline.model_dir = "/tmp/yuda-models".to_owned();
         let paths = config.offline_model_paths();
@@ -634,9 +723,49 @@ mod tests {
             paths.directory,
             PathBuf::from("/tmp/yuda-models").join(DEFAULT_OFFLINE_MODEL)
         );
-        assert!(paths.model.ends_with("model.int8.onnx"));
-        assert!(paths.tokens.ends_with("tokens.txt"));
         assert_eq!(paths.vad, PathBuf::from("/tmp/yuda-models/silero_vad.onnx"));
+        config.language = Language::Yue;
+        assert_eq!(
+            config.offline_model_paths().directory,
+            PathBuf::from("/tmp/yuda-models").join(DEFAULT_MULTILINGUAL_MODEL)
+        );
+        config.language = Language::En;
+        assert_eq!(config.offline_model_paths().directory, paths.directory);
+    }
+
+    #[test]
+    fn detects_model_family_from_files() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path();
+        let paths = OfflineModelPaths {
+            directory: root.join("m"),
+            vad: root.join("vad.onnx"),
+        };
+        assert!(paths.files().is_err(), "missing directory");
+        fs::create_dir_all(root.join("m")).expect("mkdir");
+        fs::write(root.join("m/tokens.txt"), "").expect("tokens");
+        for name in [
+            "encoder-epoch-99-avg-1.onnx",
+            "encoder-epoch-99-avg-1.int8.onnx",
+            "decoder-epoch-99-avg-1.onnx",
+            "joiner-epoch-99-avg-1.int8.onnx",
+        ] {
+            fs::write(root.join("m").join(name), "").expect("model file");
+        }
+        match paths.files().expect("transducer") {
+            ModelFiles::Transducer { encoder, .. } => {
+                assert!(
+                    encoder.ends_with("encoder-epoch-99-avg-1.int8.onnx"),
+                    "int8 preferred"
+                )
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        fs::write(root.join("m/model.int8.onnx"), "").expect("sense voice");
+        assert!(matches!(
+            paths.files().expect("sense voice"),
+            ModelFiles::SenseVoice { .. }
+        ));
     }
 
     #[test]

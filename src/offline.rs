@@ -1,6 +1,9 @@
-//! 离线引擎：官方 sherpa-onnx 的 SenseVoice-Small int8 + Silero VAD。
+//! 离线引擎：官方 sherpa-onnx 运行时 + Silero VAD。
 //!
-//! SenseVoice 是非流式模型。为了像豆包一样边说边出字，这里用 sherpa-onnx 推荐的
+//! 中文 / 英文默认用 zipformer transducer 中英模型，粤语 / 日语 / 韩语用 SenseVoice-Small；
+//! 模型族按目录里的文件自动识别（`config::ModelFiles`）。
+//!
+//! 两者都按非流式方式使用。为了像豆包一样边说边出字，这里用 sherpa-onnx 推荐的
 //! 「模拟流式」做法：VAD 把语音切成句段，已结束的句段解码一次后固定下来；
 //! 正在说的尾段每隔几百毫秒重新解码一次作为实时预览。松手时只需解码最后一段，
 //! 所以最终结果几乎没有等待。
@@ -8,7 +11,8 @@
 use anyhow::{bail, Context, Result};
 use sherpa_onnx::{
     LinearResampler, OfflineRecognizer, OfflineRecognizerConfig, OfflineSenseVoiceModelConfig,
-    SileroVadModelConfig, VadModelConfig, VoiceActivityDetector, Wave,
+    OfflineTransducerModelConfig, SileroVadModelConfig, VadModelConfig, VoiceActivityDetector,
+    Wave,
 };
 use std::{
     path::Path,
@@ -16,7 +20,7 @@ use std::{
 };
 
 use crate::{
-    config::{Config, OfflineModelPaths},
+    config::{Config, ModelFiles},
     text::join_segments,
 };
 
@@ -29,35 +33,62 @@ const PARTIAL_INTERVAL: Duration = Duration::from_millis(400);
 const MIN_TAIL_SAMPLES: usize = SAMPLE_RATE as usize * 3 / 10;
 
 /// 整段兜底解码前要求的最低能量（100 ms 窗口 RMS 的峰值）。低于它基本是静音或底噪，
-/// 送进 SenseVoice 只会得到「그.」一类的幻听。
+/// 送进模型只会得到「그.」一类的幻听。
 const MIN_SPEECH_DBFS: f64 = -45.0;
 
-pub struct SenseVoice {
+pub struct OfflineEngine {
     recognizer: OfflineRecognizer,
     vad: Option<VadModelConfig>,
+    /// 模型目录名，用于日志。
+    name: String,
 }
 
-impl SenseVoice {
-    pub fn load(config: &Config) -> Result<Self> {
-        // 实测 zh 提示下英文与粤语仍能正确输出，且比 auto 更不容易把短句误判成日韩语。
-        Self::load_with_language(config, config.language.as_str())
-    }
+fn path_string(path: &Path) -> Option<String> {
+    Some(path.to_string_lossy().into_owned())
+}
 
-    /// 直接指定 SenseVoice 的语言提示（auto / zh / en / yue / ja / ko），用于评估。
-    pub fn load_with_language(config: &Config, language: &str) -> Result<Self> {
+impl OfflineEngine {
+    /// 按配置的语言加载对应模型。
+    pub fn load(config: &Config) -> Result<Self> {
         let paths = config.offline_model_paths();
-        validate_model_paths(&paths)?;
+        let files = paths.files()?;
         let mut recognizer_config = OfflineRecognizerConfig::default();
-        recognizer_config.model_config.sense_voice = OfflineSenseVoiceModelConfig {
-            model: Some(paths.model.to_string_lossy().into_owned()),
-            language: Some(language.to_owned()),
-            use_itn: config.offline.use_itn,
-        };
-        recognizer_config.model_config.tokens = Some(paths.tokens.to_string_lossy().into_owned());
-        recognizer_config.model_config.provider = Some("cpu".to_owned());
-        recognizer_config.model_config.num_threads = config.offline.num_threads;
+        let model_config = &mut recognizer_config.model_config;
+        match &files {
+            ModelFiles::SenseVoice { model, tokens } => {
+                // 实测 zh 提示下英文与粤语仍能正确输出，且比 auto 更不容易把短句误判成日韩语。
+                model_config.sense_voice = OfflineSenseVoiceModelConfig {
+                    model: path_string(model),
+                    language: Some(config.language.as_str().to_owned()),
+                    use_itn: config.offline.use_itn,
+                };
+                model_config.tokens = path_string(tokens);
+            }
+            ModelFiles::Transducer {
+                encoder,
+                decoder,
+                joiner,
+                tokens,
+            } => {
+                model_config.transducer = OfflineTransducerModelConfig {
+                    encoder: path_string(encoder),
+                    decoder: path_string(decoder),
+                    joiner: path_string(joiner),
+                };
+                model_config.tokens = path_string(tokens);
+                recognizer_config.decoding_method = Some("greedy_search".to_owned());
+            }
+        }
+        let model_config = &mut recognizer_config.model_config;
+        model_config.provider = Some("cpu".to_owned());
+        model_config.num_threads = config.offline.num_threads;
+        let name = paths
+            .directory
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let recognizer = OfflineRecognizer::create(&recognizer_config)
-            .context("创建 SenseVoice-Small 离线识别器失败")?;
+            .with_context(|| format!("创建离线识别器失败：{name}"))?;
 
         let vad = if paths.vad.is_file() {
             Some(VadModelConfig {
@@ -78,7 +109,15 @@ impl SenseVoice {
             tracing::warn!(path = %paths.vad.display(), "缺少 Silero VAD 模型，离线识别退化为整段解码（无实时预览）");
             None
         };
-        Ok(Self { recognizer, vad })
+        Ok(Self {
+            recognizer,
+            vad,
+            name,
+        })
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     /// 解码一段 16 kHz 单声道音频。
@@ -148,7 +187,7 @@ impl SenseVoice {
 }
 
 pub struct StreamingSession<'a> {
-    engine: &'a SenseVoice,
+    engine: &'a OfflineEngine,
     vad: Option<VoiceActivityDetector>,
     audio: Vec<f32>,
     /// 已送入 VAD 的样本数。
@@ -265,22 +304,6 @@ pub fn peak_dbfs(samples: &[f32]) -> f64 {
         * 20.0
 }
 
-fn validate_model_paths(paths: &OfflineModelPaths) -> Result<()> {
-    if !paths.directory.is_dir() {
-        bail!(
-            "SenseVoice 模型目录不存在: {}；运行 omarchy-install-dictation-yuda 下载模型",
-            paths.directory.display()
-        );
-    }
-    if !paths.model.is_file() {
-        bail!("SenseVoice 模型文件不存在: {}", paths.model.display());
-    }
-    if !paths.tokens.is_file() {
-        bail!("SenseVoice tokens 文件不存在: {}", paths.tokens.display());
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,14 +318,5 @@ mod tests {
         let speech: Vec<f32> = (0..16_000).map(|i| 0.2 * (i as f32 / 10.0).sin()).collect();
         assert!(peak_dbfs(&speech) > MIN_SPEECH_DBFS);
         assert_eq!(peak_dbfs(&[]), -180.0);
-    }
-
-    #[test]
-    fn reports_missing_model_files_without_loading_native_runtime() {
-        let mut config = Config::default();
-        config.offline.model_dir = "/tmp/yuda-no-sensevoice-model".to_owned();
-        let error = validate_model_paths(&config.offline_model_paths())
-            .expect_err("missing model should fail");
-        assert!(error.to_string().contains("模型目录不存在"));
     }
 }

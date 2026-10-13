@@ -13,7 +13,7 @@ use chrono::Utc;
 use serde::Deserialize;
 use yuda::{
     config::{Config, Language},
-    sensevoice::SenseVoice,
+    offline::OfflineEngine,
 };
 
 const DEFAULT_MAX_CER: f64 = 0.15;
@@ -97,7 +97,7 @@ fn run_accuracy_eval() -> Result<()> {
     for (language, samples) in by_language {
         // 语料里的 auto 与 zh 都对应「中文（中英混输）」。
         config.language = language.parse::<Language>().unwrap_or_default();
-        let recognizer = SenseVoice::load(&config).context("按语料语言初始化 SenseVoice 失败")?;
+        let recognizer = OfflineEngine::load(&config).context("按语料语言初始化离线模型失败")?;
         for sample in samples {
             let path = resolve_sample_path(manifest_dir, &sample.file)?;
             if !path.is_file() {

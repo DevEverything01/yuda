@@ -12,8 +12,12 @@ if [[ ${YUDA_NONINTERACTIVE:-} == "1" ]]; then
 fi
 
 model_base="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models"
-model_name="sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
-model_sha256="7d1efa2138a65b0b488df37f8b89e3d91a60676e416f515b952358d83dfd347e"
+# 中文（中英混输）与英文：zipformer 中英模型
+zh_model="sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03"
+zh_sha256="5d02c36d7b44e886b7c8f0d8e051f8713acab96c264bb6ef9e718be39a6a2224"
+# 粤语、日语、韩语：SenseVoice-Small
+multi_model="sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
+multi_sha256="7d1efa2138a65b0b488df37f8b89e3d91a60676e416f515b952358d83dfd347e"
 vad_sha256="9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6"
 
 config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
@@ -65,15 +69,21 @@ download() {
   mv "$target.part" "$target"
 }
 
-step "离线模型 SenseVoice-Small（中英日韩粤，约 160 MB）"
+install_model() {
+  local name=$1 sha256=$2 marker=$3
+  if [[ -f $models/$name/$marker && -f $models/$name/tokens.txt ]]; then
+    echo "已存在：$name"
+    return 0
+  fi
+  download "$model_base/$name.tar.bz2" "$sha256" "$models/$name.tar.bz2"
+  tar -xjf "$models/$name.tar.bz2" -C "$models"
+  rm -f "$models/$name.tar.bz2"
+}
+
+step "离线模型：中英（约 130 MB）+ 粤日韩（约 160 MB）"
 mkdir -p "$models"
-if [[ -f $models/$model_name/model.int8.onnx && -f $models/$model_name/tokens.txt ]]; then
-  echo "已存在"
-else
-  download "$model_base/$model_name.tar.bz2" "$model_sha256" "$models/$model_name.tar.bz2"
-  tar -xjf "$models/$model_name.tar.bz2" -C "$models"
-  rm -f "$models/$model_name.tar.bz2"
-fi
+install_model "$zh_model" "$zh_sha256" "joiner-epoch-99-avg-1.int8.onnx"
+install_model "$multi_model" "$multi_sha256" "model.int8.onnx"
 if [[ ! -f $models/silero_vad.onnx ]]; then
   download "$model_base/silero_vad.onnx" "$vad_sha256" "$models/silero_vad.onnx"
 fi

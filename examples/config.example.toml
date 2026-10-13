@@ -26,13 +26,19 @@ connect_timeout_ms = 2000
 [offline]
 # 本地离线模型（omarchy-install-dictation-yuda 自动下载并校验）
 model_dir = "~/.local/share/yuda/models"
-model = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
+# 中文（中英混输）与英文：zipformer 中英模型，技术名词识别好、速度快
+model = "sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03"
+# 粤语、日语、韩语：SenseVoice-Small
+multilingual_model = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
 vad_model = "silero_vad.onnx"   # 边说边出字所需；缺失时退化为松手后整段识别
 num_threads = 2
-use_itn = true                  # 数字规整：「下午五点」→「下午5点」
+use_itn = true                  # SenseVoice 自带的数字规整
 
 [text]
 remove_fillers = true           # 去掉「嗯、呃」等语气词（不影响「额外」「好啊」）
+fix_term_case = true            # 技术名词规范写法：python → Python、json → JSON、mac book → MacBook
+itn = true                      # 时间日期写成数字：「下午三点」→「下午3点」（「有一点」不受影响）
+cjk_spacing = false             # 中英之间加空格：true →「用 Python 写」，false →「用Python写」
 hotwords = []                   # 云端热词，例如 ["Omarchy", "Hyprland"]
 
 [text.replacements]

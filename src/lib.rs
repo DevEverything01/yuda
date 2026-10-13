@@ -18,10 +18,10 @@ pub mod audio;
 pub mod cloud_asr;
 #[cfg(feature = "evdev")]
 pub mod hotkey;
+#[cfg(feature = "sensevoice")]
+pub mod offline;
 #[cfg(feature = "llm")]
 pub mod refine;
-#[cfg(feature = "sensevoice")]
-pub mod sensevoice;
 
 #[cfg(all(feature = "audio", feature = "sensevoice"))]
 pub mod asr;

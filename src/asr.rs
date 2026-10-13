@@ -17,7 +17,7 @@ use std::{
 use crate::{
     config::{Config, EngineMode},
     ipc::Engine,
-    sensevoice::SenseVoice,
+    offline::OfflineEngine,
 };
 
 pub enum Request {
@@ -97,7 +97,7 @@ where
 /// 离线模型及其加载参数；参数变化时重新加载。
 #[derive(Default)]
 struct OfflineModel {
-    engine: Option<SenseVoice>,
+    engine: Option<OfflineEngine>,
     error: Option<String>,
     key: Option<String>,
 }
@@ -116,11 +116,12 @@ impl OfflineModel {
         }
         self.key = Some(key);
         let started = std::time::Instant::now();
-        match SenseVoice::load(config) {
+        match OfflineEngine::load(config) {
             Ok(engine) => {
                 tracing::info!(
+                    model = engine.name(),
                     ms = started.elapsed().as_millis(),
-                    "离线模型 SenseVoice 已加载"
+                    "离线模型已加载"
                 );
                 self.engine = Some(engine);
                 self.error = None;

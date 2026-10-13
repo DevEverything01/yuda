@@ -26,7 +26,7 @@ const USAGE: &str = "语打 Yuda · Omarchy 上的中文语音输入
   yuda reload                     让 daemon 重新读取配置
   yuda history [条数]             最近的识别结果
   yuda paste-last                 重新上屏最近一条结果
-  yuda transcribe <文件.wav>      用离线引擎转写 WAV 文件
+  yuda transcribe <文件.wav> [--language 语言]  用离线引擎转写 WAV 文件
   yuda config path                配置文件路径
   yuda config get <键>            读取配置，例如 yuda config get engine
   yuda config set <键> <值>       修改配置并保留注释，例如 yuda config set llm.enabled true
@@ -260,18 +260,24 @@ fn paste_text(text: &str) -> Result<ExitCode> {
 fn transcribe(args: &[String]) -> Result<ExitCode> {
     let (path, language) = match args {
         [path] => (path, None),
-        [path, flag, language] if flag == "--sv-language" => (path, Some(language.as_str())),
-        _ => bail!("用法：yuda transcribe <文件.wav> [--sv-language auto|zh|en|yue|ja|ko]"),
+        [path, flag, language] if flag == "--language" => {
+            (path, Some(language.parse::<Language>()?))
+        }
+        _ => bail!("用法：yuda transcribe <文件.wav> [--language zh|en|yue|ja|ko]"),
     };
-    let config = Config::load_default()?;
-    let recognizer = match language {
-        Some(language) => yuda::sensevoice::SenseVoice::load_with_language(&config, language)?,
-        None => yuda::sensevoice::SenseVoice::load(&config)?,
-    };
+    let mut config = Config::load_default()?;
+    if let Some(language) = language {
+        config.language = language;
+    }
+    let engine = yuda::offline::OfflineEngine::load(&config)?;
     let started = Instant::now();
-    let text = recognizer.transcribe_wav(Path::new(path))?;
+    let text = engine.transcribe_wav(Path::new(path))?;
     let text = yuda::text::process(&text, &config.text);
-    eprintln!("耗时 {} ms", started.elapsed().as_millis());
+    eprintln!(
+        "{} · 耗时 {} ms",
+        engine.name(),
+        started.elapsed().as_millis()
+    );
     println!("{text}");
     Ok(ExitCode::SUCCESS)
 }

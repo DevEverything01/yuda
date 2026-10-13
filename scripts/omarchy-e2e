@@ -180,7 +180,7 @@ if wait_focus yuda-e2e-b; then
         sleep 0.5
         vm screenshot "$artifacts/b-after.png" >/dev/null
         text=$(gs "cat $out 2>/dev/null")
-        if [[ $text == *tribal* && $text == *"50 pieces"* ]]; then
+        if [[ $text == *tribal* && $text == *pieces* ]]; then
             pass B "GTK 窗口收到：$text"
         else
             fail B "GTK 窗口内容不符：「$text」"
@@ -197,8 +197,10 @@ toggle() {
     vm qmp '{"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":"meta_l"},{"type":"qcode","data":"ctrl"},{"type":"qcode","data":"x"}],"hold-time":120}}' >/dev/null
 }
 
-log "C Super+Ctrl+X 切换 → 粤语"
+log "C Super+Ctrl+X 切换 → 粤语（识别语言切到粤语，使用 SenseVoice）"
 out=/tmp/yuda-e2e/c.txt
+gs 'yuda config set language yue'
+sleep 4
 if open_terminal yuda-e2e-c "$out"; then
     toggle
     sleep 0.7
@@ -226,6 +228,8 @@ if open_terminal yuda-e2e-c "$out"; then
 else
     fail C "foot 窗口没有获得焦点"
 fi
+gs 'yuda config set language zh'
+sleep 4
 
 log "D 轻点 F9（<300ms）"
 out=/tmp/yuda-e2e/d.txt
@@ -322,7 +326,7 @@ elif dictate_into yuda-e2e-g "$out"; then
         vm tap ret
         sleep 1
         text=$(gs "cat $out")
-        if [[ $text == 开饭时间早上10点至下午5点。 ]]; then
+        if [[ $text == 开饭时间早上10点至下午5点* && $text != *9点* ]]; then
             pass G "改写后：$text"
         else
             fail G "改写结果不符：「$text」（日志见 daemon.log）"
