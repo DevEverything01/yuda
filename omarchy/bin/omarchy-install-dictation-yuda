@@ -99,15 +99,36 @@ systemctl --user enable yuda.service
 systemctl --user restart yuda.service
 
 step "Omarchy 界面集成"
+plugin_source="$share/omarchy-plugin/yuda.dictation"
 plugin_dir="$config_home/omarchy/plugins/yuda.dictation"
-if [[ -d $share/omarchy-plugin/yuda.dictation ]]; then
+if [[ -d $plugin_source ]]; then
   mkdir -p "${plugin_dir%/*}"
-  if [[ ! -e $plugin_dir ]]; then
-    ln -s "$share/omarchy-plugin/yuda.dictation" "$plugin_dir"
+  was_enabled=0
+  if omarchy-plugin-list --json 2>/dev/null | jq -e '.[] | select(.id == "yuda.dictation" and .enabled)' >/dev/null; then
+    was_enabled=1
   fi
-  omarchy-shell -q shell rescanPlugins >/dev/null || true
-  if ! omarchy-plugin-enable yuda.dictation >/dev/null; then
-    echo "无法启用录音浮层插件；稍后在 Setup › Plugins 中启用 yuda.dictation" >&2
+  if [[ -e $plugin_dir && ! -L $plugin_dir ]]; then
+    # 放到插件目录之外：留在里面会因为同一个 id 被外壳拒绝。
+    backup="$config_home/yuda/plugin-backup-$(date +%Y%m%d%H%M%S)"
+    mv "$plugin_dir" "$backup"
+    echo "已把原有的插件目录移到 $backup"
+  fi
+  ln -sfn "$plugin_source" "$plugin_dir"
+  if (( was_enabled )); then
+    # 热重载会继续使用缓存的旧 QML；升级后重启外壳加载新版本。
+    omarchy-restart-shell >/dev/null 2>&1 || true
+  else
+    omarchy-shell -q shell rescanPlugins >/dev/null || true
+    # 重新扫描是异步的，等插件出现在列表里再启用。
+    for _ in $(seq 50); do
+      if omarchy-plugin-list --json 2>/dev/null | jq -e '.[] | select(.id == "yuda.dictation")' >/dev/null; then
+        break
+      fi
+      sleep 0.1
+    done
+    if ! omarchy-plugin-enable yuda.dictation >/dev/null; then
+      echo "无法启用录音浮层插件；稍后在 Setup › Plugins 中启用 yuda.dictation" >&2
+    fi
   fi
 fi
 yuda omarchy-menu install

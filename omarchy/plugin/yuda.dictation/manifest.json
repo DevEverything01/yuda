@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "yuda.dictation",
+  "name": "语打 Yuda",
+  "version": "0.1.0",
+  "author": "Yuda",
+  "description": "语打中文语音输入：录音胶囊悬浮条与顶栏状态图标",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "语打",
+    "description": "语打听写状态；点击开始或结束听写",
+    "category": "Audio",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

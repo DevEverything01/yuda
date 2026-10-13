@@ -7,7 +7,7 @@ if [[ -z $pid ]]; then
 fi
 while IFS= read -r -d '' kv; do
   case "$kv" in
-    WAYLAND_DISPLAY=* | XDG_RUNTIME_DIR=* | DBUS_SESSION_BUS_ADDRESS=* | OMARCHY_PATH=* | PATH=* | XDG_CURRENT_DESKTOP=* | XDG_SESSION_TYPE=* | XDG_CONFIG_DIRS=* | XDG_DATA_DIRS=*) export "$kv" ;;
+    WAYLAND_DISPLAY=* | LANG=* | LC_*=* | XDG_RUNTIME_DIR=* | DBUS_SESSION_BUS_ADDRESS=* | OMARCHY_PATH=* | PATH=* | XDG_CURRENT_DESKTOP=* | XDG_SESSION_TYPE=* | XDG_CONFIG_DIRS=* | XDG_DATA_DIRS=*) export "$kv" ;;
   esac
 done </proc/"$pid"/environ
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
