@@ -22,7 +22,7 @@
 ### 运行
 
 ```bash
-YUDA_ASR_CONFIG=/path/config.toml cargo test --locked --features daemon --test asr_accuracy -- --ignored --nocapture
+YUDA_ASR_CONFIG=/path/config.toml cargo test --locked --features sensevoice --test asr_accuracy -- --ignored --nocapture
 ```
 
 - `tests/asr_accuracy.rs` 是长期维护的 manifest-driven harness，不是一次性测试；它按语言复用 recognizer、按样本算 Unicode-safe CER、检查场景与边界 tag，并写出报告。

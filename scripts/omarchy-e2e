@@ -149,6 +149,11 @@ if open_terminal yuda-e2e-a "$out"; then
         else
             fail A "历史条数没有加一"
         fi
+        if gs '! grep -q 开饭 ~/.local/state/omarchy/clipboard-history.json 2>/dev/null'; then
+            pass A "识别结果没有进入 Omarchy 剪贴板历史"
+        else
+            fail A "识别结果出现在 Omarchy 剪贴板历史里"
+        fi
     else
         fail A "20 秒内没有回到空闲"
     fi

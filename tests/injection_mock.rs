@@ -57,6 +57,7 @@ struct Scenario {
     ydotool_status: i32,
     fail_first_copy: bool,
     empty_clipboard: bool,
+    sensitive_clipboard: bool,
 }
 
 struct MockCommands {
@@ -80,6 +81,9 @@ printf '%s\n' "paste:$*" >> "$YUDA_MOCK_STATE/log"
 [ -f "$YUDA_MOCK_STATE/empty" ] && exit 1
 if [ "$1" = "--list-types" ]; then
     printf '%s\n' 'TEXT' 'text/plain;charset=utf-8' 'UTF8_STRING'
+    if [ -f "$YUDA_MOCK_STATE/sensitive" ]; then
+        printf '%s\n' 'x-kde-passwordManagerHint'
+    fi
 else
     cat "$YUDA_MOCK_STATE/snapshot"
 fi
@@ -118,6 +122,9 @@ cat > "$YUDA_MOCK_STATE/copy-$n"
         }
         if scenario.empty_clipboard {
             fs::write(state.join("empty"), b"1").expect("empty marker");
+        }
+        if scenario.sensitive_clipboard {
+            fs::write(state.join("sensitive"), b"1").expect("sensitive marker");
         }
         fs::write(state.join("log"), "").expect("log should be created");
 
@@ -306,4 +313,22 @@ fn copy_only_mode_never_simulates_keys() {
         .iter()
         .any(|line| line.starts_with("hyprctl") || line.starts_with("wtype")));
     assert_eq!(mock.copy(1), None);
+}
+
+#[test]
+fn restores_password_manager_content_as_sensitive() {
+    let _lock = lock();
+    let mock = MockCommands::new(Scenario {
+        sensitive_clipboard: true,
+        ..Scenario::default()
+    });
+
+    inject_text("不要泄露密码", &quick()).expect("injection should succeed");
+
+    assert_eq!(
+        mock.lines().last().map(String::as_str),
+        Some("copy:--type text/plain;charset=utf-8 --sensitive"),
+        "恢复带敏感标记的原内容时必须保留 --sensitive，否则剪贴板历史会记下密码"
+    );
+    assert_eq!(mock.copy(1).as_deref(), Some(ORIGINAL.as_bytes()));
 }

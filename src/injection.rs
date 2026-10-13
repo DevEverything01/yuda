@@ -73,6 +73,9 @@ end, { timeout = 50, type = "oneshot" })"#;
 struct ClipboardSnapshot {
     mime: String,
     data: Vec<u8>,
+    /// 原内容带 `x-kde-passwordManagerHint`（例如从密码管理器复制的密码）。
+    /// 恢复时必须保留这个标记，否则剪贴板历史会把密码记下来。
+    sensitive: bool,
 }
 
 pub fn inject_text(text: &str, options: &InjectOptions) -> Result<PasteBackend> {
@@ -113,6 +116,9 @@ fn snapshot_clipboard() -> Result<Option<ClipboardSnapshot>> {
         return Ok(None);
     }
     let listed = String::from_utf8_lossy(&types.stdout);
+    let sensitive = listed
+        .lines()
+        .any(|mime| mime.trim() == "x-kde-passwordManagerHint");
     let mime = listed
         .lines()
         .map(str::trim)
@@ -132,6 +138,7 @@ fn snapshot_clipboard() -> Result<Option<ClipboardSnapshot>> {
     Ok(Some(ClipboardSnapshot {
         mime,
         data: output.stdout,
+        sensitive,
     }))
 }
 
@@ -164,6 +171,10 @@ fn copy_text(text: &str) -> Result<()> {
 
 fn restore_clipboard(snapshot: Option<ClipboardSnapshot>) -> Result<()> {
     match snapshot {
+        Some(snapshot) if snapshot.sensitive => wl_copy(
+            &["--type", snapshot.mime.as_str(), "--sensitive"],
+            &snapshot.data,
+        ),
         Some(snapshot) => wl_copy(&["--type", snapshot.mime.as_str()], &snapshot.data),
         None => wl_copy(&["--clear"], &[]),
     }

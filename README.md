@@ -46,7 +46,7 @@
 ```bash
 git clone https://github.com/DevEverything01/yuda.git
 cd yuda
-omarchy-pkg-add rust clang cmake
+omarchy-pkg-add base-devel rust clang cmake alsa-lib pkgconf
 make build
 sudo make install PREFIX=/usr
 omarchy-install-dictation-yuda

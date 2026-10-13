@@ -3,6 +3,7 @@
 - 状态：accepted
 - 日期：2026-08-24
 - 细化：ADR 0005 第 5 条（真机行为的 CI 归属）
+- 部分取代：T3 的执行方式由 ADR 0008 取代（Omarchy 官方 VM + QMP），下文「影响」中的 `scripts/hyprland_smoke.sh` 与 `YUDA_E2E_TRIGGER` 已移除
 
 ## 背景
 
