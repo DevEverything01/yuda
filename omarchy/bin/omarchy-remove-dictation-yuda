@@ -1,0 +1,46 @@
+#!/bin/bash
+
+# omarchy:summary=Remove Yuda (语打) dictation and its desktop integration
+# omarchy:requires-sudo=true
+
+set -e
+
+interactive=1
+if [[ ${YUDA_NONINTERACTIVE:-} == "1" ]]; then
+  interactive=0
+fi
+
+config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+backend_config="$config_home/omarchy/defaults/dictation"
+
+echo "Removing Yuda (语打) dictation."
+
+systemctl --user disable --now yuda.service 2>/dev/null || true
+
+if omarchy-cmd-present yuda; then
+  yuda omarchy-menu remove || true
+fi
+
+plugin_dir="$config_home/omarchy/plugins/yuda.dictation"
+if [[ -e $plugin_dir || -L $plugin_dir ]]; then
+  omarchy-plugin-disable yuda.dictation >/dev/null 2>&1 || true
+  if [[ -L $plugin_dir ]]; then
+    rm "$plugin_dir"
+  fi
+  omarchy-shell -q shell rescanPlugins >/dev/null || true
+fi
+
+if [[ -f $backend_config && $(< "$backend_config") == "yuda" ]]; then
+  rm "$backend_config"
+fi
+hyprctl reload >/dev/null 2>&1 || true
+
+if (( interactive )) && gum confirm --default=false "Also delete Yuda's config, history and offline models?"; then
+  rm -rf "$config_home/yuda" "${XDG_STATE_HOME:-$HOME/.local/state}/yuda" "${XDG_DATA_HOME:-$HOME/.local/share}/yuda"
+fi
+
+if (( interactive )) && omarchy-pkg-present yuda-git && gum confirm "Uninstall the yuda-git package?"; then
+  omarchy-pkg-drop yuda-git
+fi
+
+echo "Yuda dictation removed."

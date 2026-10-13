@@ -1,23 +1,37 @@
 APP := yuda
 PREFIX ?= /usr/local
+BINDIR := $(PREFIX)/bin
+SHAREDIR := $(PREFIX)/share/$(APP)
+FEATURES ?= daemon
 
-.PHONY: build run install uninstall clean lint fmt ui test test-linux test-daemon check hooks smoke
+.PHONY: build run install uninstall clean lint fmt test test-linux test-daemon check hooks smoke e2e
 
 build:
-	cargo build --release --features daemon
+	cargo build --release --locked --features $(FEATURES)
 
 run:
-	cargo run --features daemon -- --help
+	cargo run --features $(FEATURES) -- daemon
 
-install: build
-	install -Dm755 target/release/$(APP) $(DESTDIR)$(PREFIX)/bin/$(APP)
-	install -Dm644 packaging/yuda.service $(DESTDIR)$(PREFIX)/lib/systemd/user/yuda.service
-	install -Dm644 examples/config.example.toml $(DESTDIR)$(PREFIX)/share/$(APP)/config.example.toml
+# install 不依赖 build：sudo make install 时不应以 root 重新编译。
+install:
+	@test -x target/release/$(APP) || { echo "先运行 make build"; exit 1; }
+	install -Dm755 target/release/$(APP) $(DESTDIR)$(BINDIR)/$(APP)
+	install -Dm755 omarchy/bin/omarchy-dictation-yuda $(DESTDIR)$(BINDIR)/omarchy-dictation-yuda
+	install -Dm755 omarchy/bin/omarchy-install-dictation-yuda $(DESTDIR)$(BINDIR)/omarchy-install-dictation-yuda
+	install -Dm755 omarchy/bin/omarchy-remove-dictation-yuda $(DESTDIR)$(BINDIR)/omarchy-remove-dictation-yuda
+	install -dm755 $(DESTDIR)$(PREFIX)/lib/systemd/user
+	sed 's|@BINDIR@|$(BINDIR)|' packaging/yuda.service > $(DESTDIR)$(PREFIX)/lib/systemd/user/yuda.service
+	install -Dm644 examples/config.example.toml $(DESTDIR)$(SHAREDIR)/config.example.toml
+	if [ -d omarchy/plugin/yuda.dictation ]; then \
+		install -dm755 $(DESTDIR)$(SHAREDIR)/omarchy-plugin; \
+		cp -r omarchy/plugin/yuda.dictation $(DESTDIR)$(SHAREDIR)/omarchy-plugin/; \
+	fi
 
 uninstall:
-	rm -f $(DESTDIR)$(PREFIX)/bin/$(APP)
+	rm -f $(DESTDIR)$(BINDIR)/$(APP)
+	rm -f $(DESTDIR)$(BINDIR)/omarchy-dictation-yuda $(DESTDIR)$(BINDIR)/omarchy-install-dictation-yuda $(DESTDIR)$(BINDIR)/omarchy-remove-dictation-yuda
 	rm -f $(DESTDIR)$(PREFIX)/lib/systemd/user/yuda.service
-	rm -rf $(DESTDIR)$(PREFIX)/share/$(APP)
+	rm -rf $(DESTDIR)$(SHAREDIR)
 
 clean:
 	cargo clean
@@ -39,11 +53,11 @@ check: fmt lint test
 smoke:
 	scripts/perf_smoke.sh
 
+e2e:
+	scripts/omarchy-e2e
+
 hooks:
 	git config core.hooksPath scripts
 
 fmt:
 	cargo fmt --check
-
-ui:
-	python3 ui/serve.py

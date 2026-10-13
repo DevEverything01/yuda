@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# omarchy:summary=Record dictation using Yuda (语打, Chinese-first, Doubao-grade)
+# omarchy:args=<start|stop|toggle>
+
+# Omarchy's dictation backend contract: return promptly, nonzero on failure,
+# and `stop` must succeed when Yuda is idle or unavailable.
+case "${1:-}" in
+  start|toggle)
+    error=$(yuda "$1" 2>&1)
+    status=$?
+    # 2 = the daemon could not be reached or started. Rejections (status 1) are
+    # already visible in the recording capsule, so only notify for the former.
+    if (( status == 2 )); then
+      omarchy-notification-send -g 󰍭 "语打不可用" "${error#语打：}" -u critical
+    fi
+    exit "$status"
+    ;;
+  stop)
+    if omarchy-cmd-present yuda; then
+      yuda stop >/dev/null 2>&1 || true
+    fi
+    ;;
+  *)
+    echo "Usage: omarchy dictation yuda <start|stop|toggle>" >&2
+    exit 1
+    ;;
+esac

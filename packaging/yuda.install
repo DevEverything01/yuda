@@ -1,0 +1,14 @@
+post_install() {
+  echo "==> 语打已安装。在 Omarchy 中运行（或在菜单 Setup › Defaults › Dictation 选择「Yuda 语打」）："
+  echo "==>   omarchy-install-dictation-yuda"
+  echo "==> 它会下载离线模型（约 160 MB，sha256 校验）、启用 yuda.service、"
+  echo "==> 安装录音浮层插件，并把 Omarchy 默认听写后端切换为语打。"
+}
+
+post_upgrade() {
+  echo "==> 语打已更新：systemctl --user restart yuda.service"
+}
+
+pre_remove() {
+  echo "==> 卸载前建议先运行 omarchy-remove-dictation-yuda 移除菜单条目与插件链接。"
+}

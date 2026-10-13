@@ -1,0 +1,124 @@
+#!/bin/bash
+
+# omarchy:summary=Install and configure Yuda (语打) Chinese dictation
+# omarchy:requires-sudo=false
+
+set -e
+
+# Unattended runs (tests, scripts) skip every prompt and keep the defaults.
+interactive=1
+if [[ ${YUDA_NONINTERACTIVE:-} == "1" ]]; then
+  interactive=0
+fi
+
+model_base="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models"
+model_name="sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
+model_sha256="7d1efa2138a65b0b488df37f8b89e3d91a60676e416f515b952358d83dfd347e"
+vad_sha256="9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6"
+
+config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+models="${XDG_DATA_HOME:-$HOME/.local/share}/yuda/models"
+
+step() {
+  printf '\n\e[1m%s\e[0m\n' "$1"
+}
+
+if omarchy-cmd-missing omarchy-dictation-use; then
+  echo "This Omarchy has no pluggable dictation backends yet. Update Omarchy (omarchy-update) and try again." >&2
+  exit 1
+fi
+
+if omarchy-cmd-missing yuda; then
+  if (( interactive )) && gum confirm "Install Yuda (语打) from the AUR?"; then
+    omarchy-pkg-aur-add yuda-git
+  else
+    echo "Yuda is not installed. Install the yuda-git package first." >&2
+    exit 1
+  fi
+fi
+
+share="$(dirname "$(dirname "$(command -v yuda)")")/share/yuda"
+if [[ ! -d $share ]]; then
+  echo "Yuda's data files are missing ($share). Reinstall the package." >&2
+  exit 1
+fi
+
+# wl-clipboard carries the result; wtype is the paste fallback outside Hyprland.
+omarchy-pkg-add wl-clipboard wtype
+
+step "配置 ~/.config/yuda/config.toml"
+if [[ ! -e $config_home/yuda/config.toml ]]; then
+  install -Dm600 "$share/config.example.toml" "$config_home/yuda/config.toml"
+  echo "已写入默认配置（中文中英混输、云端优先自动降级离线）"
+else
+  echo "保留已有配置"
+fi
+
+download() {
+  local url=$1 sha256=$2 target=$3
+  curl -fL --progress-bar -o "$target.part" "$url"
+  if ! echo "$sha256  $target.part" | sha256sum --check --quiet; then
+    rm -f "$target.part"
+    echo "校验失败：$url" >&2
+    return 1
+  fi
+  mv "$target.part" "$target"
+}
+
+step "离线模型 SenseVoice-Small（中英日韩粤，约 160 MB）"
+mkdir -p "$models"
+if [[ -f $models/$model_name/model.int8.onnx && -f $models/$model_name/tokens.txt ]]; then
+  echo "已存在"
+else
+  download "$model_base/$model_name.tar.bz2" "$model_sha256" "$models/$model_name.tar.bz2"
+  tar -xjf "$models/$model_name.tar.bz2" -C "$models"
+  rm -f "$models/$model_name.tar.bz2"
+fi
+if [[ ! -f $models/silero_vad.onnx ]]; then
+  download "$model_base/silero_vad.onnx" "$vad_sha256" "$models/silero_vad.onnx"
+fi
+
+if (( interactive )) && [[ -z $(yuda config get cloud.access_key) ]]; then
+  step "豆包云端识别（可选）"
+  echo "与豆包输入法同款的火山引擎语音大模型，识别更准；需要火山引擎控制台的密钥（约 ¥2.2/小时）。"
+  echo "不配置也能用：语打会使用本地离线模型。"
+  if gum confirm --default=false "现在填写火山引擎密钥？"; then
+    app_key=$(gum input --placeholder "App ID（新版控制台只有 API Key 时留空）")
+    access_key=$(gum input --password --placeholder "Access Token 或 API Key")
+    if [[ -n $access_key ]]; then
+      yuda config set-string cloud.app_key "$app_key"
+      yuda config set-string cloud.access_key "$access_key"
+      echo "已保存（配置文件权限 0600）"
+    fi
+  fi
+fi
+
+step "后台服务 yuda.service"
+systemctl --user daemon-reload
+systemctl --user enable yuda.service
+systemctl --user restart yuda.service
+
+step "Omarchy 界面集成"
+plugin_dir="$config_home/omarchy/plugins/yuda.dictation"
+if [[ -d $share/omarchy-plugin/yuda.dictation ]]; then
+  mkdir -p "${plugin_dir%/*}"
+  if [[ ! -e $plugin_dir ]]; then
+    ln -s "$share/omarchy-plugin/yuda.dictation" "$plugin_dir"
+  fi
+  omarchy-shell -q shell rescanPlugins >/dev/null || true
+  if ! omarchy-plugin-enable yuda.dictation >/dev/null; then
+    echo "无法启用录音浮层插件；稍后在 Setup › Plugins 中启用 yuda.dictation" >&2
+  fi
+fi
+yuda omarchy-menu install
+
+omarchy-dictation-use yuda
+hyprctl reload >/dev/null
+
+if yuda doctor >/dev/null; then
+  echo "环境检查通过"
+else
+  yuda doctor || true
+fi
+
+omarchy-notification-send -g 󰍬 "语打已就绪" "按住 Right Alt 或 F9 说话，松开即上屏；Super + Ctrl + X 切换录音。" -t 10000

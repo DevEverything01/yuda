@@ -1,13 +1,16 @@
 [Unit]
-Description=Yuda Chinese-first voice input daemon
+Description=语打 Yuda 中文语音输入
+Documentation=https://github.com/DevEverything01/yuda
+# 随图形会话启停：uwsm 会话已导入 WAYLAND_DISPLAY / HYPRLAND_INSTANCE_SIGNATURE。
+PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
-ExecStart=%h/.local/bin/yuda --daemon
+Type=simple
+ExecStart=@BINDIR@/yuda daemon
 Restart=on-failure
 RestartSec=2
 Environment=RUST_LOG=info
-PassEnvironment=WAYLAND_DISPLAY WAYLAND_SOCKET XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target
