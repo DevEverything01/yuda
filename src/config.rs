@@ -166,6 +166,9 @@ pub struct Config {
     pub injection: InjectionConfig,
     #[serde(default)]
     pub history: HistoryConfig,
+    /// 旧版的顶层 `hotkey`（evdev 键名）；读取后并入 `trigger.evdev_key`，不再写出。
+    #[serde(default, rename = "hotkey", skip_serializing)]
+    legacy_hotkey: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -187,10 +190,12 @@ pub struct TriggerConfig {
 #[serde(deny_unknown_fields)]
 pub struct CloudConfig {
     /// 火山引擎控制台的 APP ID（请求头 X-Api-App-Key）；新版控制台的单一 API Key 用户留空。
-    #[serde(default)]
+    /// 旧版键名 `app_id`。
+    #[serde(default, alias = "app_id")]
     pub app_key: String,
     /// 火山引擎控制台的 Access Token（请求头 X-Api-Access-Key）；或新版控制台的 API Key（X-Api-Key）。
-    #[serde(default)]
+    /// 旧版键名 `access_token`。
+    #[serde(default, alias = "access_token")]
     pub access_key: String,
     #[serde(default = "default_cloud_resource_id")]
     pub resource_id: String,
@@ -217,6 +222,9 @@ pub struct OfflineConfig {
     pub num_threads: i32,
     #[serde(default = "default_true")]
     pub use_itn: bool,
+    /// 旧版的 `offline.language`；语言现在只由顶层 `language` 决定，读取后忽略。
+    #[serde(default, rename = "language", skip_serializing)]
+    legacy_language: Option<String>,
 }
 
 /// 识别后的本地文本处理（不依赖 LLM）。
@@ -313,6 +321,7 @@ impl Default for OfflineConfig {
             vad_model: default_vad_model(),
             num_threads: default_offline_num_threads(),
             use_itn: true,
+            legacy_language: None,
         }
     }
 }
@@ -383,9 +392,10 @@ impl Config {
         }
         let raw = fs::read_to_string(path)
             .with_context(|| format!("读取配置失败: {}", path.display()))?;
-        let config: Self = toml::from_str(&raw).with_context(|| {
+        let mut config: Self = toml::from_str(&raw).with_context(|| {
             format!("解析配置失败: {}；请检查 TOML 语法与字段名", path.display())
         })?;
+        config.absorb_legacy();
         config
             .validate()
             .with_context(|| format!("配置无效: {}", path.display()))?;
@@ -395,6 +405,21 @@ impl Config {
     /// 读取默认路径的配置。
     pub fn load_default() -> Result<Self> {
         Self::load(Self::default_path()?)
+    }
+
+    /// 把旧版字段并入新结构（文件本身由 `migrate_file` 改写）。
+    fn absorb_legacy(&mut self) {
+        if let Some(hotkey) = self.legacy_hotkey.take() {
+            if self.trigger.evdev_key == DEFAULT_EVDEV_KEY && !hotkey.trim().is_empty() {
+                self.trigger.evdev_key = hotkey;
+            }
+        }
+        self.offline.legacy_language = None;
+        for value in [&mut self.cloud.app_key, &mut self.cloud.access_key] {
+            if PLACEHOLDER_KEYS.contains(&value.as_str()) {
+                value.clear();
+            }
+        }
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -521,6 +546,129 @@ impl OfflineModelPaths {
     }
 }
 
+/// 旧版示例配置里的占位密钥；当成未配置。
+const PLACEHOLDER_KEYS: [&str; 2] = ["your-volc-app-id", "your-volc-access-token"];
+/// 旧版的默认 endpoint，迁移时换成当前默认值（用户改过的值不动）。
+const LEGACY_DEFAULT_ENDPOINT: &str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel";
+/// 旧键名 → 新键名（同一张表内）。
+const RENAMED_KEYS: [(&str, &str, &str); 2] = [
+    ("cloud", "app_id", "app_key"),
+    ("cloud", "access_token", "access_key"),
+];
+
+/// 把旧版配置文件改写成当前格式，保留注释与格式。返回做过的修改说明；没有修改时为空。
+pub fn migrate_file(path: impl AsRef<Path>) -> Result<Vec<String>> {
+    let path = path.as_ref();
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("读取配置失败: {}", path.display()))?;
+    let (updated, changes) = migrate_in(&raw)?;
+    if !changes.is_empty() {
+        let config: Config = toml::from_str(&updated).context("迁移后的配置无法解析")?;
+        config.validate().context("迁移后的配置无效")?;
+        write_private(path, &updated)?;
+    }
+    Ok(changes)
+}
+
+fn migrate_in(raw: &str) -> Result<(String, Vec<String>)> {
+    let mut document: toml_edit::DocumentMut = raw.parse().context("配置不是有效的 TOML")?;
+    let mut changes = Vec::new();
+
+    if let Some(item) = document.remove("hotkey") {
+        let key = item.as_str().unwrap_or_default().to_owned();
+        let trigger = document
+            .entry("trigger")
+            .or_insert_with(|| toml_edit::Item::Table(toml_edit::Table::new()));
+        if let Some(table) = trigger.as_table_mut() {
+            if !table.contains_key("evdev_key") && !key.is_empty() {
+                table.insert("evdev_key", toml_edit::value(key.clone()));
+            }
+        }
+        changes.push(format!("hotkey → trigger.evdev_key（{key}）"));
+    }
+
+    for (table, old, new) in RENAMED_KEYS {
+        let Some(table) = document
+            .get_mut(table)
+            .and_then(toml_edit::Item::as_table_mut)
+        else {
+            continue;
+        };
+        if let Some((old_key, item)) = table.remove_entry(old) {
+            if !table.contains_key(new) {
+                // 保留原来的注释与位置信息。
+                let mut key = toml_edit::Key::new(new);
+                *key.leaf_decor_mut() = old_key.leaf_decor().clone();
+                table.insert_formatted(&key, item);
+            }
+            changes.push(format!("cloud.{old} → cloud.{new}"));
+        }
+    }
+
+    if let Some(cloud) = document
+        .get_mut("cloud")
+        .and_then(toml_edit::Item::as_table_mut)
+    {
+        for key in ["app_key", "access_key"] {
+            let placeholder = cloud
+                .get(key)
+                .and_then(toml_edit::Item::as_str)
+                .is_some_and(|value| PLACEHOLDER_KEYS.contains(&value));
+            if placeholder {
+                replace_value(cloud, key, toml_edit::Value::from(""));
+                changes.push(format!("清空占位密钥 cloud.{key}"));
+            }
+        }
+        if cloud.get("endpoint").and_then(toml_edit::Item::as_str) == Some(LEGACY_DEFAULT_ENDPOINT)
+        {
+            replace_value(
+                cloud,
+                "endpoint",
+                toml_edit::Value::from(DEFAULT_CLOUD_ENDPOINT),
+            );
+            changes.push("cloud.endpoint → bigmodel_async（官方推荐的双向流式优化版）".to_owned());
+        }
+    }
+
+    if let Some(offline) = document
+        .get_mut("offline")
+        .and_then(toml_edit::Item::as_table_mut)
+    {
+        if offline.remove("language").is_some() {
+            changes.push("删除 offline.language（由顶层 language 决定）".to_owned());
+        }
+        if offline.get("model").and_then(toml_edit::Item::as_str)
+            == Some(DEFAULT_MULTILINGUAL_MODEL)
+        {
+            replace_value(
+                offline,
+                "model",
+                toml_edit::Value::from(DEFAULT_OFFLINE_MODEL),
+            );
+            changes.push("offline.model → zipformer 中英模型（技术名词更准）".to_owned());
+        }
+    }
+
+    Ok((document.to_string(), changes))
+}
+
+/// 替换值本身，保留键前注释与行尾注释。
+fn replace_value(table: &mut toml_edit::Table, key: &str, value: toml_edit::Value) {
+    match table.get_mut(key).and_then(toml_edit::Item::as_value_mut) {
+        Some(existing) => {
+            let decor = existing.decor().clone();
+            *existing = value;
+            *existing.decor_mut() = decor;
+        }
+        None => {
+            table.insert(key, toml_edit::Item::Value(value));
+        }
+    }
+}
+
 /// 就地修改配置文件中的一个键，保留用户的注释与格式；修改后的整体配置必须仍然有效。
 ///
 /// `key` 形如 `engine`、`llm.enabled`；`value` 按 TOML 字面量解析，失败时视为字符串。
@@ -547,6 +695,7 @@ fn set_value_in(raw: &str, key: &str, value: &str) -> Result<String> {
         bail!("无效的配置键: {key}");
     }
     let parsed = parse_toml_value(value);
+    let table_name = tables.join(".");
     let mut table = document.as_table_mut();
     for name in tables {
         let entry = table
@@ -556,17 +705,13 @@ fn set_value_in(raw: &str, key: &str, value: &str) -> Result<String> {
             .as_table_mut()
             .with_context(|| format!("配置项 {name} 不是表"))?;
     }
-    match table.get_mut(last).and_then(toml_edit::Item::as_value_mut) {
-        // 只替换值本身，保留键前注释与行尾注释。
-        Some(existing) => {
-            let decor = existing.decor().clone();
-            *existing = parsed;
-            *existing.decor_mut() = decor;
-        }
-        None => {
-            table.insert(last, toml_edit::Item::Value(parsed));
+    // 旧键名与新键名同时存在会被拒绝解析：写新键时去掉旧键。
+    for (renamed_table, old, new) in RENAMED_KEYS {
+        if renamed_table == table_name && *last == new {
+            table.remove(old);
         }
     }
+    replace_value(table, last, parsed);
     Ok(document.to_string())
 }
 
@@ -857,6 +1002,80 @@ mod tests {
         let example: Config = toml::from_str(include_str!("../examples/config.example.toml"))
             .expect("examples/config.example.toml must parse");
         assert_eq!(example, Config::default(), "示例配置必须与默认值一致");
+    }
+
+    const LEGACY_CONFIG: &str = r#"# 旧版配置
+engine = "auto"
+language = "zh"
+hotkey = "KEY_RIGHTALT"   # evdev 键名
+
+[cloud]
+app_id = "1234567890" # 控制台 APP ID
+access_token = "your-volc-access-token"
+endpoint = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
+resource_id = "volc.bigasr.sauc.duration"
+connect_timeout_ms = 2000
+
+[offline]
+model = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
+model_dir = "~/.local/share/yuda/models"
+language = "auto"
+use_itn = true
+num_threads = 2
+
+[injection]
+paste_delay_ms = 120
+"#;
+
+    #[test]
+    fn legacy_config_still_loads() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("config.toml");
+        fs::write(&path, LEGACY_CONFIG).expect("write");
+        let config = Config::load(&path).expect("旧版配置必须仍能加载，否则 daemon 升级后无法启动");
+        assert_eq!(config.trigger.evdev_key, "KEY_RIGHTALT");
+        assert_eq!(config.cloud.app_key, "1234567890");
+        assert_eq!(config.cloud.access_key, "", "占位密钥视为未配置");
+        assert!(!config.cloud.is_configured());
+    }
+
+    #[test]
+    fn migrate_rewrites_legacy_keys_and_keeps_comments() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("config.toml");
+        fs::write(&path, LEGACY_CONFIG).expect("write");
+        let changes = migrate_file(&path).expect("migrate");
+        assert!(changes.len() >= 5, "{changes:?}");
+        let raw = fs::read_to_string(&path).expect("read");
+        assert!(raw.contains("# 旧版配置"));
+        assert!(
+            raw.contains("app_key = \"1234567890\" # 控制台 APP ID"),
+            "{raw}"
+        );
+        for gone in ["hotkey", "app_id", "access_token", "your-volc"] {
+            assert!(!raw.contains(gone), "{gone} should be gone:\n{raw}");
+        }
+        let config = Config::load(&path).expect("load");
+        assert_eq!(config.trigger.evdev_key, "KEY_RIGHTALT");
+        assert_eq!(config.offline.model, DEFAULT_OFFLINE_MODEL);
+        assert_eq!(config.cloud.endpoint, DEFAULT_CLOUD_ENDPOINT);
+        assert!(
+            migrate_file(&path).expect("second run").is_empty(),
+            "migration is idempotent"
+        );
+    }
+
+    #[test]
+    fn setting_a_renamed_key_removes_the_legacy_one() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("config.toml");
+        fs::write(&path, "[cloud]\naccess_token = \"old\"\n").expect("write");
+        set_value(&path, "cloud.access_key", "\"new\"").expect("set");
+        let config = Config::load(&path).expect("load");
+        assert_eq!(config.cloud.access_key, "new");
+        assert!(!fs::read_to_string(&path)
+            .expect("read")
+            .contains("access_token"));
     }
 
     #[test]

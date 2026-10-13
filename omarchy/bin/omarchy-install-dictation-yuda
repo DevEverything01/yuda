@@ -41,6 +41,29 @@ if omarchy-cmd-missing yuda; then
   fi
 fi
 
+# 旧版 `make install` 默认装在 /usr/local：PATH 里 /usr/local/bin 排在 /usr/bin 前面，
+# /usr/local/lib/systemd/user 的单元也优先于 /usr/lib，会遮蔽新安装的语打。
+# 只处理没有被任何软件包拥有的 yuda 文件，并且只在 PATH 里同时有另一个 yuda 时才算残留。
+if (( $(type -ap yuda | wc -l) > 1 )); then
+  stale=()
+  for file in /usr/local/bin/yuda /usr/local/lib/systemd/user/yuda.service /usr/local/share/yuda; do
+    if [[ -e $file ]] && ! pacman -Qqo "$file" >/dev/null 2>&1; then
+      stale+=("$file")
+    fi
+  done
+  if (( ${#stale[@]} > 0 )); then
+    echo "发现旧版语打留下的文件，它们会遮蔽当前版本："
+    printf '  %s\n' "${stale[@]}"
+    if [[ ${YUDA_REMOVE_STALE:-} == "1" ]] || { (( interactive )) && gum confirm "删除这些旧文件？"; }; then
+      sudo rm -rf -- "${stale[@]}"
+      hash -r
+    else
+      echo "保留旧文件会导致快捷键调用到旧版本；请先删除它们再重新运行。" >&2
+      exit 1
+    fi
+  fi
+fi
+
 share="$(dirname "$(dirname "$(command -v yuda)")")/share/yuda"
 if [[ ! -d $share ]]; then
   echo "Yuda's data files are missing ($share). Reinstall the package." >&2
@@ -56,11 +79,8 @@ if [[ ! -e $config_home/yuda/config.toml ]]; then
   echo "已写入默认配置（中文中英混输、云端优先自动降级离线）"
 else
   echo "保留已有配置"
-  # 迁移：旧版把中文模型默认设为 SenseVoice；仍是旧默认值时换成中英模型（用户自选的值不动）。
-  if [[ $(yuda config get offline.model 2>/dev/null) == "$multi_model" ]]; then
-    yuda config set-string offline.model "$zh_model"
-    echo "中文离线模型已升级为 zipformer 中英模型（技术名词更准）"
-  fi
+  # 旧版键名、占位密钥与旧默认值改写为当前格式（保留注释；用户改过的值不动）。
+  yuda config migrate
 fi
 
 download() {
@@ -110,8 +130,14 @@ fi
 
 step "后台服务 yuda.service"
 systemctl --user daemon-reload
+# 先 disable 再 enable：旧版单元挂在 default.target 下，会在图形会话就绪前启动。
+systemctl --user disable yuda.service >/dev/null 2>&1 || true
 systemctl --user enable yuda.service
 systemctl --user restart yuda.service
+unit=$(systemctl --user show -P FragmentPath yuda.service)
+if [[ $unit != "$(dirname "$(dirname "$(command -v yuda)")")/lib/systemd/user/yuda.service" ]]; then
+  echo "注意：yuda.service 来自 $unit，不是本次安装的版本；如果是你自己写的单元，请确认 ExecStart 为 $(command -v yuda) daemon" >&2
+fi
 
 step "Omarchy 界面集成"
 plugin_source="$share/omarchy-plugin/yuda.dictation"

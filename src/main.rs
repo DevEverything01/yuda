@@ -29,6 +29,7 @@ const USAGE: &str = "语打 Yuda · Omarchy 上的中文语音输入
   yuda transcribe <文件.wav> [--language 语言]  用离线引擎转写 WAV 文件
   yuda cloud-test [文件.wav]      用已配置的火山引擎密钥测试豆包云端识别
   yuda config path                配置文件路径
+  yuda config migrate             把旧版配置改写成当前格式（保留注释）
   yuda config get <键>            读取配置，例如 yuda config get engine
   yuda config set <键> <值>       修改配置并保留注释，例如 yuda config set llm.enabled true
   yuda config set-string <键> <值> 按字符串保存，例如 yuda config set-string cloud.access_key 123
@@ -39,7 +40,10 @@ const USAGE: &str = "语打 Yuda · Omarchy 上的中文语音输入
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    init_logging(args.first().map(String::as_str) == Some("daemon"));
+    init_logging(matches!(
+        args.first().map(String::as_str),
+        Some("daemon" | "--daemon")
+    ));
     match run(&args) {
         Ok(code) => code,
         Err(error) => {
@@ -66,7 +70,8 @@ fn init_logging(daemon: bool) {
 fn run(args: &[String]) -> Result<ExitCode> {
     let rest = args.get(1..).unwrap_or_default();
     match args.first().map(String::as_str) {
-        Some("daemon") => run_daemon(),
+        // `--daemon` 是旧版 systemd 单元用的写法，保留兼容。
+        Some("daemon" | "--daemon") => run_daemon(),
         Some("start") if rest.first().map(String::as_str) == Some("--edit") => {
             control(Command::StartEdit, true)
         }
@@ -355,6 +360,17 @@ fn config_command(args: &[String]) -> Result<ExitCode> {
     let path = Config::default_path()?;
     match args {
         [action] if action == "path" => println!("{}", path.display()),
+        [action] if action == "migrate" => {
+            let changes = config::migrate_file(&path)?;
+            if changes.is_empty() {
+                println!("配置已是最新格式");
+            } else {
+                for change in changes {
+                    println!("迁移：{change}");
+                }
+                let _ = ipc::call(Command::Reload, CONTROL_TIMEOUT);
+            }
+        }
         [action, key] if action == "get" => {
             println!("{}", config::get_value(&Config::load(&path)?, key)?);
         }
@@ -368,7 +384,9 @@ fn config_command(args: &[String]) -> Result<ExitCode> {
             // daemon 未运行时修改照样生效于下次启动。
             let _ = ipc::call(Command::Reload, CONTROL_TIMEOUT);
         }
-        _ => bail!("用法：yuda config path | get <键> | set <键> <值> | set-string <键> <字符串>"),
+        _ => bail!(
+            "用法：yuda config path | migrate | get <键> | set <键> <值> | set-string <键> <字符串>"
+        ),
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -634,6 +652,22 @@ fn doctor() -> Result<ExitCode> {
         ),
         EngineMode::Offline => {}
     }
+    let exec_start = Process::new("systemctl")
+        .args(["--user", "show", "-P", "ExecStart", "yuda.service"])
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+        .unwrap_or_default();
+    let current = std::env::current_exe()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    check(
+        exec_start.contains(&current) && exec_start.contains(" daemon"),
+        "yuda.service 指向当前的 yuda",
+        &format!(
+            "单元里的 ExecStart 是 {}；运行 omarchy-install-dictation-yuda 修复",
+            exec_start.trim()
+        ),
+    );
     check(
         ipc::status(CONTROL_TIMEOUT).is_ok(),
         "daemon 运行中",
