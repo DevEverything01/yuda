@@ -24,7 +24,8 @@
 - [x] Omarchy shell 插件：录音胶囊（波形、实时文本、离线徽标）+ 顶栏组件，跟随主题
 - [x] Omarchy 菜单：Setup › Defaults › Dictation 与 Setup › Yuda 语打
 - [x] Omarchy VM 全自动端到端验收（`scripts/omarchy-e2e`）
-- [ ] `packaging/PKGBUILD` 净 chroot 构建验证，发布 AUR `yuda-git`
+- [x] `packaging/PKGBUILD`：makepkg 构建（含 check）+ pacman -U 安装 + 端到端验收已在 Omarchy VM 通过
+- [ ] 净 chroot（`extra-x86_64-build`）构建，发布 AUR `yuda-git`
 - [ ] 演示 GIF
 - [ ] 语音改写指令（「把 A 改成 B」「删掉上一句」）
 - [ ] 真人语料准确性评估（coding / chat / email）

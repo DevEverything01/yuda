@@ -53,7 +53,7 @@ scripts/omarchy-vm screenshot /tmp/x.png
 
 场景（详见脚本头部）：A 按住 F9 → foot 终端；B 按住 Right Alt → GTK4 窗口；C Super+Ctrl+X 切换 → 粤语；D 轻点 F9 不上屏；E 静音不上屏。每个场景断言文本内容、剪贴板恢复与历史条数。
 
-最近一次结果（2026-10-14，印度宿主机，Omarchy edge `4.0.0.r6942.gf5006bd`，Hyprland 0.56.2）：集成检查 4 项与场景 A–F 全部通过；松手到上屏 268 / 715 / 234 / 311 ms。另行手工验证：Omarchy 菜单两处条目与勾选状态、`omarchy-menu-select` 切换语言后 daemon 热加载、卸载后重装、Catppuccin Latte 主题下胶囊配色跟随。
+最近一次结果（2026-10-14，印度宿主机，Omarchy edge `4.0.0.r6942.gf5006bd`，Hyprland 0.56.2；`makepkg` 构建的 `yuda-git` 软件包经 `pacman -U` 安装）：集成检查 4 项与场景 A–F 全部通过，识别结果未进入 Omarchy 剪贴板历史；松手到上屏 241 / 760 / 235 / 232 ms。另行手工验证：Omarchy 菜单两处条目与勾选状态、`omarchy-menu-select` 切换语言后 daemon 热加载、卸载后重装、Catppuccin Latte 主题下胶囊配色跟随。
 
 未覆盖：真实麦克风硬件、实体键盘布局（AltGr）、GPU 渲染下的动画性能——在实体 Omarchy 机器上抽查。云端识别没有真实密钥时只能由 T2 覆盖协议。
 
