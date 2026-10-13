@@ -139,7 +139,7 @@ if open_terminal yuda-e2e-a "$out"; then
         vm tap ret
         sleep 1
         text=$(gs "cat $out")
-        if [[ $text == *开饭时间* ]]; then
+        if [[ $text == *时间早上9点至下午5点* ]]; then
             pass A "终端收到：$text"
         else
             fail A "终端内容不符：「$text」"
@@ -154,7 +154,7 @@ if open_terminal yuda-e2e-a "$out"; then
         else
             fail A "历史条数没有加一"
         fi
-        if gs '! grep -q 开饭 ~/.local/state/omarchy/clipboard-history.json 2>/dev/null'; then
+        if gs '! grep -q 早上9点至下午5点 ~/.local/state/omarchy/clipboard-history.json 2>/dev/null'; then
             pass A "识别结果没有进入 Omarchy 剪贴板历史"
         else
             fail A "识别结果出现在 Omarchy 剪贴板历史里"
@@ -326,7 +326,7 @@ elif dictate_into yuda-e2e-g "$out"; then
         vm tap ret
         sleep 1
         text=$(gs "cat $out")
-        if [[ $text == 开饭时间早上10点至下午5点* && $text != *9点* ]]; then
+        if [[ $text == *时间早上10点至下午5点* && $text != *9点* ]]; then
             pass G "改写后：$text"
         else
             fail G "改写结果不符：「$text」（日志见 daemon.log）"
@@ -405,7 +405,7 @@ if dictate_into yuda-e2e-j "$out"; then
         vm tap ret
         sleep 1
         text=$(gs "cat $out")
-        if [[ $text == 开饭时间早上9点至下午5点？ ]]; then
+        if [[ $text == *时间早上9点至下午5点？ ]]; then
             pass J "修改后：$text"
         else
             fail J "修改结果不符：「$text」"
@@ -439,7 +439,7 @@ if open_terminal yuda-e2e-f "$out"; then
         vm tap ret
         sleep 1
         text=$(gs "cat $out")
-        if [[ $text == *开饭时间* ]]; then
+        if [[ $text == *时间早上9点至下午5点* ]]; then
             pass F "降级后照常上屏：$text"
         else
             fail F "终端内容不符：「$text」"
