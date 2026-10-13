@@ -1,6 +1,8 @@
 # Yuda (语打) — Implementation Prompt
 
 > Working name: **Yuda / 语打** (rename freely). Target: Arch Linux / Omarchy, Hyprland on Wayland. Language: Rust, single-binary daemon.
+>
+> **Omarchy 4 deviations (ADR 0007):** on Omarchy, Yuda is a dictation backend — Omarchy owns the hotkeys (hold Right Alt / F9, toggle Super+Ctrl+X) and calls `omarchy-dictation-yuda`; the overlay and status widget are an Omarchy shell (Quickshell) plugin instead of GTK4/ksni/Waybar; settings live in the Omarchy menu. The evdev hotkey (§1) remains as the optional `trigger.source = "evdev"` mode for other Hyprland setups. Everything else in this spec stands.
 
 Please implement a Linux (Arch Linux / Omarchy, Hyprland on Wayland) Chinese-first push-to-talk voice input app in Rust (single binary daemon, working name "Yuda / 语打"), with the following requirements:
 

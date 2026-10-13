@@ -1,53 +1,90 @@
 # 语打 Yuda · 架构总览
 
-> 权威实现规格见 `PROMPT.md`；本文档描述模块划分与数据流。架构变化必须同 PR 更新本文件。
+> 产品规格见 `PROMPT.md`；Omarchy 集成方式见 `docs/adr/0007-omarchy-native-integration.md`；进程间协议见 `docs/ipc.md`。架构变化必须同 PR 更新本文件。
 
-## 总体数据流
+## 组成
 
 ```
-Hyprland 会话（Wayland）
-│
-├─ evdev 全局热键（只读，默认右 Ctrl，按住说 push-to-talk）
-│      ▼ key down / key up
-├─ 音频采集 cpal ── rubato 重采样 16kHz mono ──┬─► RMS 电平表（驱动波形 UI）
-│      ▼                                        │
-├─ ASR 路由（cloud / offline / auto）◄──────────┘
-│   ├─ 云端：火山豆包大模型流式 WebSocket（ITN + 标点，部分结果实时渲染）
-│   └─ 离线：sherpa-onnx SenseVoice-Small int8（2024-07-17 包）+ silero-vad（2s 超时自动切换，UI 显示「离线」徽标）
-│      ▼ 最终文本（key up 后定稿）
-├─ LLM 保守纠错（可选，OpenAI 兼容端点，5s 超时 → 放行原文）
-│      ▼
-├─ 上屏：剪贴板快照 → wl-copy → 模拟 Ctrl+V（wtype；兜底 ydotool）→ 120ms → 恢复剪贴板
-│
-├─ UI：gtk4-layer-shell 胶囊悬浮条（overlay 层，keyboard-mode=none，namespace=yuda）
-└─ 状态外露：StatusNotifierItem 托盘（ksni）+ $XDG_RUNTIME_DIR/yuda.sock（Waybar JSON 行）
+Omarchy（Hyprland + Quickshell）                     语打
+──────────────────────────────────                  ─────────────────────────────────────────
+按住 Right Alt / F9、Super+Ctrl+X
+  └─ omarchy dictation start|stop|toggle
+       └─ omarchy-dictation-yuda ───── start/stop ──► yuda daemon（systemd 用户服务）
+                                                     │  $XDG_RUNTIME_DIR/yuda/yuda.sock
+omarchy-shell 插件 yuda.dictation ◄── subscribe ─────┤  （一行一条 JSON 快照，~30 Hz）
+  ├─ 录音胶囊（波形 + 实时文本 + 离线徽标）           │
+  └─ 顶栏麦克风组件（点击 = omarchy dictation toggle）│
+                                                     │
+Omarchy 菜单 Setup › Yuda 语打 ── yuda menu … ──────►│  reload
+Setup › Defaults › Dictation ── omarchy-install-dictation-yuda（模型、服务、插件、菜单、选为默认）
 ```
 
-## 模块划分（src/ 建议结构）
+## daemon 数据流
 
-| 模块 | 职责 | 关键依赖 |
+```
+start ──► audio::Capture（cpal → PipeWire，单声道 16 kHz，30 Hz 电平）
+              │ 样本                    │ 电平
+              ▼                         ▼
+          asr 工作线程               daemon 主循环 ──► 订阅者（shell 插件、yuda watch）
+          ├─ 云端：cloud_asr（火山引擎豆包大模型，WebSocket 二进制协议，100 ms 分包）
+          └─ 离线：sensevoice（SenseVoice-Small + Silero VAD 分段，尾段 400 ms 重解码出预览）
+              │ Partial / Final
+              ▼
+stop  ──► text::process（去语气词、用户词库、标点整理）
+              ▼
+          [refine：OpenAI 兼容端点保守纠错，5 s 超时放行原文，偏离过大拒收]
+              ▼
+          injection（剪贴板快照 → wl-copy --sensitive → Hyprland send_key_state 粘贴 → 等待 → 恢复）
+              ▼
+          history（本机 jsonl，0600）
+```
+
+`engine = auto`：云端已配置且在 `connect_timeout_ms` 内连上 → 云端；否则离线并标记 `fallback`。云端中途出错 → 用缓存的整段音频离线重识别。
+
+## 模块
+
+| 模块 | 职责 | feature |
 |---|---|---|
-| `config` | TOML 配置加载/保存，0600 权限，模型名与 endpoint 的唯一默认值来源 | serde, toml, directories |
-| `hotkey` | evdev 监听、设备热插拔、alone-press 判定、300ms 防抖 | evdev, udev, inotify |
-| `audio` | cpal 采集、rubato 重采样、RMS 电平广播 | cpal, rubato |
-| `asr` | ASR trait + 云端 WS 客户端 + 官方 sherpa-onnx SenseVoice-Small 离线实现 + auto 路由 | tokio, tokio-tungstenite, sherpa-onnx |
-| `refine` | LLM 保守纠错（OpenAI 兼容 chat/completions，5s 超时） | reqwest |
-| `inject` | 剪贴板快照/恢复 + Ctrl+V 合成（wtype → ydotool 兜底链） | wl-clipboard, wtype（外部命令） |
-| `ui` | 胶囊悬浮条（波形/状态机/动画）+ 设置窗口 | gtk4, gtk4-layer-shell |
-| `tray` | 托盘菜单 + Waybar socket 状态发布 | ksni, tokio unix socket |
-| `daemon` | 组装以上模块；systemd user unit 托管 | tokio |
+| `config` | TOML 配置（0600）、枚举化字段、`set_value` 保留注释就地修改；模型名与 endpoint 默认值的唯一来源 | 默认 |
+| `ipc` | 命令、回应、状态快照；带超时的客户端 | 默认 |
+| `session` | 纯状态机：命令 → 动作，最短按住时长，会话号让迟到结果失效 | 默认 |
+| `text` | 语气词过滤、词库最长匹配替换、分段拼接、标点整理 | 默认 |
+| `injection` | 剪贴板快照/恢复与粘贴后端链（hyprctl → wtype → ydotool → 仅剪贴板） | 默认 |
+| `history` | 识别历史 jsonl，定长压缩 | 默认 |
+| `omarchy` | 菜单扩展的标记块合并/移除与 JSONC 校验 | 默认 |
+| `audio` | cpal 采集、下混、线性重采样、电平 | `audio` |
+| `sensevoice` | SenseVoice + VAD 模拟流式会话、静音能量门 | `sensevoice` |
+| `cloud_asr` | 火山引擎大模型流式识别客户端 | `cloud` |
+| `refine` | LLM 保守纠错与偏离检查 | `llm` |
+| `asr` | 识别工作线程：常驻离线模型、按会话路由引擎、降级 | `audio` + `sensevoice` |
+| `daemon` | 主循环：socket、状态机、录音、识别事件、纠错、上屏、通知 | `audio` + `sensevoice` |
+| `hotkey` | 可选的 evdev 监听（`trigger.source = "evdev"`），只读、不 GRAB | `evdev` |
 
-## 状态机（悬浮条）
+`daemon` feature = 全部。默认 feature 只含纯逻辑，任何平台（含 macOS）可编译和测试。
+
+## 线程
+
+- **主循环**持有全部可变状态，只通过 channel 收消息：IPC 请求、订阅、电平、识别事件、纠错结果、上屏结果；用 `recv_timeout` 驱动错误展示（1.5 s）与录音上限两个定时器。
+- **IPC 线程**逐个处理连接；控制命令转给主循环，200 ms 内回应。`subscribe` 连接交给主循环持有，非阻塞写，写不进就断开。
+- **录音线程**每次会话新建，持有 cpal Stream；停止时 join，保证样本全部送达识别线程后才发 `End`。
+- **识别线程**常驻，持有离线模型（约 2.8 s 加载，常驻约 500 MB）；会话期间处理音频与预览，结束后回到待命。
+- **纠错 / 上屏线程**每次会话短暂存在，结果发回主循环。
+
+## 状态机
 
 ```
-idle ──key down──► recording ──key up──► transcribing ──► refining ──► injecting ──► idle
-                     │                        │              │
-                     └──<300ms──► idle        └──超时/失败──► error（红，1.5s 自动消失）──► idle
+idle ──start──► recording ──stop──► transcribing ──► [refining] ──► injecting ──► idle
+                  │   │                  │                │              │
+                  │   └─cancel / 按住 <300ms──► idle      └──失败───────► error ──1.5s──► idle
+                  └─麦克风/引擎失败──► error
 ```
 
-## 关键设计约束
+一次会话最多上屏一次：取消或新会话会推进会话号，旧会话的识别、纠错、上屏结果被丢弃。
 
-1. **永不抢焦点**：悬浮条 layer-shell keyboard-mode=none；托盘/设置窗口除外（用户主动打开）。
-2. **上屏幂等**：一次会话只上屏一次；任何阶段失败走 error 态，不得半截文本留在剪贴板。
-3. **模型配置唯一权威**：`config.toml` + `src/config.rs` 默认值常量；业务代码零硬编码（同扶摇 `backend/config.py` 纪律）。
-4. **优雅降级**：云端失败 → 离线；LLM 超时 → 原文；wtype 缺失 → ydotool → 仅复制到剪贴板并提示。
+## 关键约束
+
+1. **永不抢焦点**：浮层是 layer-shell overlay，不接收键盘；粘贴发往当前聚焦窗口。
+2. **结果不丢**：粘贴后端全部失败时结果留在剪贴板并通知；只有确认粘贴发出后才恢复原剪贴板。
+3. **模型配置唯一权威**：`config.toml` + `src/config.rs` 常量；业务代码不硬编码模型名与 endpoint。
+4. **优雅降级**：云端 → 离线；LLM 超时/偏离 → 原文；VAD 缺失 → 整段解码；Hyprland 不可用 → wtype → ydotool → 剪贴板。
+5. **只扩展 Omarchy**：不改 Omarchy 自带文件；菜单、插件、默认后端选择均可由 `omarchy-remove-dictation-yuda` 撤销。

@@ -1,96 +1,131 @@
 # 语打 Yuda
 
-**Omarchy（Arch Linux + Hyprland）上的中文-first 语音输入法：按住说话，松手上屏。**
+**Omarchy 上的中文语音输入：按住说话，松手上屏。** 对标豆包输入法的语音体验，以 Omarchy 原生听写后端的形式接入——快捷键、菜单、顶栏、主题都和 Omarchy 一体。
 
-对标豆包输入法的语音体验——豆包同源的云端语音大模型 + 端侧离线兜底 + AI 保守纠错，填补 Linux 桌面中文语音输入的空白。
+- 按住 **Right Alt** 或 **F9** 说话，松开即上屏；**Super + Ctrl + X** 切换录音。
+- 屏幕底部的录音胶囊实时显示波形和识别中的文字，颜色跟随 Omarchy 主题。
+- 云端用火山引擎豆包语音大模型（与豆包输入法同款）；断网或未配置时自动用本地 SenseVoice 模型，**不联网也能用**。
 
-> 当前状态：**Linux daemon 已接入真实 evdev、cpal、SenseVoice 与 Wayland 剪贴板上屏链路**。需要使用 `--features daemon` 构建，并在 Omarchy 上下载 SenseVoice 模型后启用用户服务；真实硬件 smoke test 仍以目标机输出为准。
+## 与豆包输入法对照
 
-## 为什么是语打
+| 能力 | 语打 | 说明 |
+|---|---|---|
+| 按住说话、松手上屏 | ✓ | Omarchy 统一听写快捷键；按住少于 300 ms 视为误触 |
+| 点按切换录音 | ✓ | Super + Ctrl + X，或点击顶栏麦克风 |
+| 边说边出字 | ✓ | 离线：VAD 分句 + 尾段 0.4 s 刷新；云端：流式结果 |
+| 自动标点、数字规整 | ✓ | 「下午五点」→「下午5点。」 |
+| 中英混输 | ✓ | `Python`、`JSON` 等英文原样保留 |
+| 粤语 / English / 日本語 / 한국어 | ✓ | Setup › Yuda 语打 › 识别语言 |
+| 去口语化（嗯、呃） | ✓ | 只删不可能是正文的语气词，「额外」「好啊」不受影响 |
+| 个人词库 | ✓ | `[text.replacements]`，例如 `"配森" = "Python"` |
+| 热词 | ✓ | 云端引擎 `hotwords` |
+| AI 纠错 | ✓ | 任意 OpenAI 兼容端点；只修同音字和误识别的术语，超时直接上屏原文 |
+| 豆包大模型识别 | ◐ | 已按官方协议实现并通过本地协议测试；尚未用真实密钥联调 |
+| 离线识别 | ✓ | SenseVoice-Small int8，本机 CPU，5 秒语音约 0.3 秒出结果 |
+| 识别历史、重新上屏 | ✓ | 只存本机，`yuda history`、菜单「历史记录 · 重新上屏」 |
+| 终端里也能上屏 | ✓ | 与 Omarchy 的 Super+V 同一路径，终端自动用 Ctrl+Shift+V |
+| 不污染剪贴板 | ✓ | 上屏后恢复原剪贴板；临时内容标记为敏感，不进剪贴板历史 |
+| 语音改写指令（「把 A 改成 B」） | ✗ | 尚未支持 |
 
-- Linux 上现有的语音听写工具（hyprwhspr、linuxwhisper 等）全部是 Whisper 系，英文强、中文够用但不出色：标点、中英混输、口语纠错都不是为中国用户设计。
-- 豆包输入法证明了现代语音输入的体验上限，但它没有、也不见得有 Linux 版。
-- 语打把这套体验带给中文 Arch/Omarchy 用户：**云端豆包大模型流式识别为主，SenseVoice-Small 端侧模型离线兜底**，断网也能用。
+## 安装
 
-## 计划特性
+需要 **Omarchy 4 的 edge 版本**（带可插拔听写后端；`omarchy-dictation-use` 命令存在即可）。稳定版 4.0.4 还没有这个接口，安装器会提示先更新。
 
-- 🎙 **按住说**：可配置全局热键（默认右 Ctrl），按住录音、松手上屏
-- ☁️🔌 **双引擎**：火山引擎豆包语音识别大模型（流式，中英混输、自动标点）+ sherpa-onnx SenseVoice-Small int8 离线模型（断网自动切换）
-  - 本地模型默认使用 `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17`（SenseVoice-Small int8）；首次使用时放在 `~/.local/share/yuda/models`，不把模型文件提交到仓库。
-    包内包含 `model.int8.onnx` 与 `tokens.txt`；官方模型发布页：<https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models>。
-  模型运行时在 Linux 目标环境通过 `--features sensevoice` 启用；该特性使用官方 `sherpa-onnx` Rust API 加载 `model.int8.onnx` 与 `tokens.txt`。当前 macOS 验证环境不会自动下载原生 sherpa-onnx 库。
-- 🪟 **现代悬浮条**：屏幕底部胶囊浮窗，实时 RMS 波形 + 流式文字预览，毛玻璃模糊，不抢焦点
-- 🤖 **保守 AI 纠错**：只修明显识别错误（同音字、配森→Python 这类术语误转），绝不改写你的话
-- 📋 **可靠上屏**：剪贴板快照 → 写入 → 模拟 Ctrl+V → 恢复原剪贴板
-- 🧩 **Waybar / 托盘集成**：状态一目了然，GTK4 设置界面管理引擎、热键与密钥
-
-## 本地预览
-
-无需音频设备即可检查 UI 层交互：
-
-```bash
-python3 ui/serve.py
-```
-
-然后打开 <http://127.0.0.1:4173>。
-
-可操作流程：
-
-- **键盘输入**：点击编辑区直接输入或修改文字，点击右下角箭头提交；界面显示「正在上屏」，随后回到空闲态。
-- **按住说话**：按住「按住说话」按钮，或在页面中按住右 Ctrl；观察录音计时、波形与「正在聆听」状态，松手后进入整理态，再显示可编辑识别结果。
-- **防误触**：短于 300 ms 的按住会显示明确错误提示，约 1.5 秒后回到可操作的空闲态。
-- **错误与设置**：空内容提交会提示原因；设置面板可调整识别模式、语言、热键与保守优化开关，测试按钮会报告模拟端到端延迟。
-
-预览只在当前页面内模拟识别和上屏，不读取麦克风、不上传文本、不保存密钥；它不能替代真实 Linux/Hyprland 验收。
-
-## SenseVoice-Small 本地运行时
-
-默认配置只保存模型目录和运行参数，不把模型文件放进仓库。Linux 目标机上：
+从源码安装：
 
 ```bash
-mkdir -p ~/.local/share/yuda/models
-cd ~/.local/share/yuda/models
-curl -LO https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
-tar -xjf sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
-rm sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
+git clone https://github.com/DevEverything01/yuda.git
+cd yuda
+omarchy-pkg-add rust clang cmake
+make build
+sudo make install PREFIX=/usr
+omarchy-install-dictation-yuda
 ```
 
-启用官方 Rust 运行时：
+`packaging/PKGBUILD` 是 `yuda-git` 的 AUR 包定义（尚未发布到 AUR），也可以在 `packaging/` 目录里用 `makepkg -si` 安装。
+
+`omarchy-install-dictation-yuda` 会：
+
+1. 写入默认配置 `~/.config/yuda/config.toml`（权限 0600，已有配置不覆盖）；
+2. 下载离线模型 SenseVoice-Small 与 Silero VAD（约 160 MB，sha256 校验）；
+3. 询问是否填写火山引擎密钥（可跳过）；
+4. 启用 `yuda.service`；
+5. 安装录音浮层插件 `yuda.dictation` 并合并 Omarchy 菜单条目；
+6. 把 Omarchy 默认听写后端切换为语打。
+
+之后也可以在 Omarchy 菜单 **Setup › Defaults › Dictation** 里在 Superwhisper、Voxtype 和 **Yuda 语打** 之间切换。
+
+## 使用
+
+| 操作 | 效果 |
+|---|---|
+| 按住 Right Alt 或 F9 | 录音；松开后识别并上屏 |
+| Super + Ctrl + X | 开始 / 结束录音 |
+| 点击顶栏麦克风 | 同上 |
+| Setup › Yuda 语打 › 历史记录 | 选一条重新上屏 |
+
+在 Right Alt 是 AltGr 的键盘布局上，用 F9。
+
+## 设置
+
+Omarchy 菜单 **Setup › Yuda 语打**：
+
+- **识别引擎**：自动（云端优先，2 秒连不上用离线）/ 云端 / 离线
+- **识别语言**：中文（中英混输）/ English / 粤语 / 日本語 / 한국어
+- **去除语气词**、**AI 纠错**：开关
+- **编辑配置**：打开 `~/.config/yuda/config.toml`，所有选项都有中文注释（见 [examples/config.example.toml](examples/config.example.toml)）
+- **重启语打**
+
+命令行同样可用：`yuda config set engine offline`、`yuda config get language`。修改后 daemon 自动重新加载。
+
+## 豆包云端识别（可选）
+
+1. 在[火山引擎控制台](https://console.volcengine.com/speech/app)开通「豆包语音 · 大模型流式语音识别」，创建应用。
+2. 旧版控制台：把 **APP ID** 填到 `cloud.app_key`，**Access Token** 填到 `cloud.access_key`；新版控制台只有一个 **API Key**：`app_key` 留空，`access_key` 填 API Key。
+3. `resource_id` 默认 `volc.bigasr.sauc.duration`（小时版）；并发版改为 `volc.bigasr.sauc.concurrent`。
+
+计费按识别时长，参考价约 ¥2.2/小时，以火山引擎官网为准。没有密钥时语打始终使用离线模型。
+
+## 隐私
+
+- 离线模式下音频只在本机内存中处理，不落盘。
+- 云端模式把录音发送到火山引擎；AI 纠错把识别文本发送到你配置的端点。
+- 识别历史只存本机 `~/.local/state/yuda/history.jsonl`（0600），可在配置中关闭。
+
+## 故障排查
 
 ```bash
-cargo build --release --features sensevoice
+yuda doctor                         # 检查配置、模型、服务、Omarchy 集成
+yuda status                         # 当前状态
+journalctl --user -u yuda -f        # daemon 日志
 ```
 
-`sherpa-onnx` 构建脚本会按目标平台准备原生库；若构建环境不能访问 GitHub，可预先设置 `SHERPA_ONNX_LIB_DIR` 或 `SHERPA_ONNX_ARCHIVE_DIR`。当前 macOS 验证环境未下载原生库，因此只验证了默认特性和模型路径/参数逻辑，未声称完成真实音频推理。
+- **没有反应**：确认 `omarchy default dictation` 输出 `yuda`，`systemctl --user status yuda` 在运行。
+- **识别为空**：「没有识别到语音」说明麦克风没有声音，检查 PipeWire 默认输入设备。
+- **某个应用收不到文字**：语打会把结果留在剪贴板并通知，按 Super+V 粘贴；个别游戏或 XWayland 程序不支持 Wayland 剪贴板同步。
 
-## Rust 验证
+卸载：`omarchy-remove-dictation-yuda`（Omarchy 菜单 Remove › Dictation › Yuda 语打）。
 
-```bash
-cargo fmt --check
-cargo clippy -- -D warnings
-cargo test
-cargo build
-```
+## 非 Omarchy 的 Hyprland
 
-`cargo run -- --simulate` 会在终端演示空闲、录音、整理、优化与准备上屏状态转换。`cargo run -- --json` 输出 Waybar 风格状态 JSON。
+在配置里设置 `trigger.source = "evdev"`，语打会自己监听 `trigger.evdev_key`（默认右 Ctrl，需要 `sudo usermod -aG input $USER` 后重新登录），然后 `systemctl --user enable --now yuda`。此模式没有录音浮层。
 
-真实目标环境安装后：
-
-```bash
-systemctl --user enable --now yuda
-```
-
-真实 Hyprland/evdev/麦克风验证不在当前 macOS UI 预览范围内。
-## 文档
+## 开发
 
 | 文档 | 内容 |
 |---|---|
-| [PROMPT.md](PROMPT.md) | 实现提示词——产品规格的权威来源 |
-| [docs/research.md](docs/research.md) | 调研报告：竞品、ASR 选型、上屏技术 |
-| [docs/architecture.md](docs/architecture.md) | 架构总览与模块划分 |
-| [docs/roadmap.md](docs/roadmap.md) | 里程碑 M0–M3 |
+| [AGENTS.md](AGENTS.md) | 协作规范（人类与 AI Agent） |
+| [PROMPT.md](PROMPT.md) | 产品规格 |
+| [docs/architecture.md](docs/architecture.md) | 架构与模块 |
+| [docs/ipc.md](docs/ipc.md) | daemon ↔ 插件 ↔ 适配器协议 |
+| [docs/testing.md](docs/testing.md) | 测试分层与 Omarchy VM 端到端验收 |
 | [docs/adr/](docs/adr/) | 架构决策记录 |
-| [AGENTS.md](AGENTS.md) | 仓库协作标准 |
+
+```bash
+make check                          # fmt + clippy + 默认特性测试（任意平台）
+cargo test --features daemon        # 全量（Linux）
+scripts/omarchy-e2e                 # 在 Omarchy VM 中端到端验收（KVM 宿主机）
+```
 
 ## 许可
 

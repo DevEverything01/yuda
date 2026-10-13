@@ -1,40 +1,43 @@
 # 语打 Yuda · 路线图
 
-## M0 — 技术验证 spike（1–2 天）
+## M0 — 技术验证
 
-- [ ] sherpa-onnx + SenseVoice-Small int8 在目标 Omarchy 机器上跑通中文识别（公开 AISHELL-1 基线已跑通；产品真人语料仍待采集）
-- [ ] 火山引擎豆包流式 ASR WebSocket 连通性（申请 appid/token，跑通双向流式 + 部分结果回调）
-- [x] evdev 热键监听 + wtype/wl-clipboard 上屏的最小可行性验证（Omarchy daemon 监听已验证；完整真实语音上屏需运行 T3 脚本）
+- [x] sherpa-onnx + SenseVoice-Small int8 在 Omarchy 上跑通（中/英/粤测试语音；5.6 秒中文约 0.36 秒出结果）
+- [x] 火山引擎豆包大模型流式协议：按官方文档与官方 demo 实现，mock 服务器覆盖全部帧类型；TLS 握手与 401 映射用占位密钥实测
+- [ ] 火山引擎真实密钥联调（流式结果、热词、末包）
+- [x] 上屏可行性：Hyprland `send_key_state` / wtype / wl-clipboard
 
-## M1 — 自用骨架（第 1–2 周）
+## M1 — Omarchy 原生骨架
 
-按住说 → 录音 → 云端 ASR → 上屏全链路，无悬浮条 UI（notify-send 显示状态）。
+- [x] Omarchy 听写后端：`omarchy-dictation-yuda`、安装与卸载脚本、`omarchy-dictation-use`
+- [x] IPC 驱动的 daemon（systemd 用户服务，`graphical-session.target`）
+- [x] cpal 采集（优先 16 kHz，线性重采样兜底）、电平
+- [x] 剪贴板快照 / 注入 / 恢复，终端自动 Ctrl+Shift+V，不进剪贴板历史
+- [x] config.toml（0600，保留注释的就地修改）
 
-- [x] evdev 全局热键（alone-press 判定、300ms 防抖、input 组检查）
-- [x] cpal + rubato 音频管线
-- [ ] 云端 ASR 客户端（流式，部分结果暂存）
-- [x] 剪贴板快照/注入/恢复
-- [x] config.toml 加载（0600）
+## M2 — 对标豆包
 
-## M2 — 产品化（第 3–4 周）
+- [x] 边说边出字：离线 VAD 分段模拟流式；云端流式
+- [x] 自动 / 云端 / 离线路由，云端失败用缓存音频离线重识别
+- [x] 去语气词、个人词库、云端热词、AI 保守纠错（超时与偏离保护）
+- [x] 识别历史与重新上屏
+- [x] Omarchy shell 插件：录音胶囊（波形、实时文本、离线徽标）+ 顶栏组件，跟随主题
+- [x] Omarchy 菜单：Setup › Defaults › Dictation 与 Setup › Yuda 语打
+- [x] Omarchy VM 全自动端到端验收（`scripts/omarchy-e2e`）
+- [ ] `packaging/PKGBUILD` 净 chroot 构建验证，发布 AUR `yuda-git`
+- [ ] 演示 GIF
+- [ ] 语音改写指令（「把 A 改成 B」「删掉上一句」）
+- [ ] 真人语料准确性评估（coding / chat / email）
 
-- [ ] 胶囊悬浮条：RMS 波形（5 条、权重 [0.5,0.8,1.0,0.75,0.55]、attack 40%/release 15%、±4% 抖动）、弹性宽度、进出动画
-- [ ] 离线 SenseVoice-Small 兜底 + auto 路由 + 「离线」徽标
-- [ ] LLM 保守纠错（可开关，5s 超时放行原文）
-- [ ] GTK4 设置窗口 + 托盘 + Waybar socket
-- [ ] `packaging/PKGBUILD`，净 chroot 构建验证，AUR 发布 `yuda-git`
-- [ ] 中文 README 完整化（Omarchy 设置走查、演示 GIF）
+## M3 — 键盘一体化（预研）
 
-## M3 — 键盘一体化（第 2 个月起，可与 M2 并行预研）
-
-- [ ] spike（3 天）：fcitx5 module + 自研候选窗 UI 的可行性验证（classicui 替换 vs input-method-v2 直连）
-- [ ] fcitx5 + Rime 内核 + 雾凇词库/万象语法模型
-- [ ] 自研现代候选窗 UI（毛玻璃/圆角/动画）
-- [ ] LLM 智能层：整句纠错/联想（句末触发，非逐键）
+- [ ] fcitx5 module + 自研候选窗（Omarchy 已预装 fcitx5）
+- [ ] Rime 内核 + 雾凇词库 / 万象语法模型
+- [ ] LLM 智能层：整句纠错 / 联想（句末触发，非逐键）
 - [ ] 语音改走 IME commit 通道（光标处上屏、可撤销）
 
-## 非目标（明确不做）
+## 非目标
 
-- X11 支持；GNOME/KDE 专属适配
+- X11；GNOME/KDE 专属适配
 - 自研拼音引擎（Rime 就是内核）
-- 方言全集（MVP 只保普通话 + 中英混输；方言依赖云端大模型能力，后续按用户反馈开）
+- 修改 Omarchy 自带文件
