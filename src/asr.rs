@@ -228,6 +228,17 @@ impl<F: Fn(Event)> Worker<F> {
             return;
         }
 
+        self.run_offline(session, &[], fallback, rx);
+    }
+
+    /// 离线流式会话；`buffered` 是切换前已经采到的音频（云端中途失败时）。
+    fn run_offline(
+        &mut self,
+        session: u64,
+        buffered: &[f32],
+        fallback: bool,
+        rx: &Receiver<Request>,
+    ) {
         let Some(engine) = self.offline.engine.as_ref() else {
             let message = self.offline.unavailable();
             self.fail(session, message);
@@ -240,14 +251,15 @@ impl<F: Fn(Event)> Worker<F> {
             fallback,
         });
         let mut stream = engine.session();
+        stream.accept(buffered);
         let interrupt = loop {
+            if let Some(text) = stream.partial() {
+                (self.emit)(Event::Partial { session, text });
+            }
             match next_audio(session, rx, &mut self.pending) {
                 Ok(Some(samples)) => stream.accept(&samples),
                 Ok(None) => {}
                 Err(interrupt) => break interrupt,
-            }
-            if let Some(text) = stream.partial() {
-                (self.emit)(Event::Partial { session, text });
             }
         };
         match interrupt {
@@ -297,6 +309,11 @@ impl<F: Fn(Event)> Worker<F> {
                             .collect();
                         if let Err(error) = cloud.send_audio(&pcm) {
                             tracing::warn!(%error, "云端识别中断");
+                            if config.engine == EngineMode::Auto && self.offline.engine.is_some() {
+                                // 立刻切到离线流式，用户继续看到实时预览。
+                                self.run_offline(session, &audio, true, rx);
+                                return;
+                            }
                             broken = Some(error.to_string());
                         }
                     }
@@ -330,7 +347,7 @@ impl<F: Fn(Event)> Worker<F> {
                         engine: Engine::Offline,
                         fallback: true,
                     });
-                    Ok(engine.decode(&audio))
+                    Ok(engine.transcribe_samples(&audio))
                 }
                 None => Err(format!("云端识别失败：{error}")),
             },

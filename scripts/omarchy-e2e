@@ -13,6 +13,7 @@
 #   C  Super+Ctrl+X 两次 → 切换模式录一段粤语
 #   D  轻点 F9（<300ms） → 不识别、不上屏
 #   E  按住但不说话      → 「没有识别到语音」，不上屏
+#   F  云端密钥无效      → 自动降级离线（浮层显示「离线」），照常上屏
 #
 # 截图与 daemon 日志写入 target/e2e/。
 set -euo pipefail
@@ -254,6 +255,41 @@ if open_terminal yuda-e2e-e "$out"; then
 else
     fail E "foot 窗口没有获得焦点"
 fi
+
+log "F 云端密钥无效 → 自动降级离线"
+out=/tmp/yuda-e2e/f.txt
+gs 'yuda config set-string cloud.access_key yuda-e2e-invalid-key'
+if open_terminal yuda-e2e-f "$out"; then
+    vm hold f9 7.5 &
+    hold=$!
+    sleep 0.7
+    speak zh.wav
+    sleep 2.5
+    snapshot=$(gs 'yuda status --json')
+    vm screenshot "$artifacts/f-fallback.png" >/dev/null
+    wait "$hold"
+    if [[ $(jq -r '"\(.engine) \(.fallback)"' <<<"$snapshot") == "offline true" ]]; then
+        pass F "云端被拒后自动降级离线"
+    else
+        fail F "没有降级：$snapshot"
+    fi
+    if wait_idle 20; then
+        vm tap ret
+        sleep 1
+        text=$(gs "cat $out")
+        if [[ $text == *开饭时间* ]]; then
+            pass F "降级后照常上屏：$text"
+        else
+            fail F "终端内容不符：「$text」"
+        fi
+    else
+        fail F "20 秒内没有回到空闲"
+    fi
+    close_target "cat > $out"
+else
+    fail F "foot 窗口没有获得焦点"
+fi
+gs 'yuda config set-string cloud.access_key ""'
 
 gs 'journalctl --user -u yuda.service --since "-10min" --no-pager -o short-precise' >"$artifacts/daemon.log" 2>&1 || true
 log "结果"

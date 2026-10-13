@@ -112,11 +112,16 @@ impl SenseVoice {
                 .context("创建重采样器失败")?
                 .resample(wave.samples(), true)
         };
+        Ok(self.transcribe_samples(&samples))
+    }
+
+    /// 用流式路径（VAD 分段 + 能量门）转写一整段 16 kHz 音频。
+    pub fn transcribe_samples(&self, samples: &[f32]) -> String {
         let mut session = self.session();
         for chunk in samples.chunks(SAMPLE_RATE as usize / 10) {
             session.accept(chunk);
         }
-        Ok(session.finish())
+        session.finish()
     }
 
     /// 开始一次流式会话。
