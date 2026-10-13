@@ -625,9 +625,14 @@ fn doctor() -> Result<ExitCode> {
     );
     if config.engine != EngineMode::Cloud {
         let paths = config.offline_model_paths();
+        let name = paths
+            .directory
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
         check(
             paths.is_complete(),
-            "离线模型 SenseVoice-Small",
+            &format!("离线模型 {name}"),
             &format!(
                 "缺少 {}；运行 omarchy-install-dictation-yuda",
                 paths.directory.display()
