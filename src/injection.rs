@@ -13,7 +13,7 @@ use std::{
     io::Write,
     process::{Command, Stdio},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +93,7 @@ pub fn delete_chars(count: usize) -> Result<()> {
         return Ok(());
     }
     if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
+        wait_for_released_modifiers(Duration::from_millis(1_500));
         let lua = format!(
             r#"for _ = 1, {count} do
   hl.dispatch(hl.dsp.send_key_state({{ mods = "", key = "BackSpace", state = "down" }}))
@@ -111,6 +112,36 @@ end"#
         return Ok(());
     }
     bail!("无法模拟退格键：需要 Hyprland 或 wtype")
+}
+
+/// 用户仍按着的修饰键。切换快捷键（Super+Ctrl+X）松开前就可能已经出结果；此时发送合成按键，
+/// 实测会让 fcitx5 虚拟键盘的修饰键状态失去同步，之后的 Enter 被当成 Super+Ctrl+Enter。
+const HELD_MODIFIERS_LUA: &str = r#"for _, key in ipairs({ "Super_L", "Super_R", "Control_L", "Control_R", "Shift_L", "Shift_R", "Alt_L", "Alt_R", "ISO_Level3_Shift" }) do
+  if hl.is_key_down(key) then return "held" end
+end
+return "free""#;
+
+/// 等用户松开所有修饰键再发送合成按键；最多等 `timeout`，之后照常发送。
+fn wait_for_released_modifiers(timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let held = Command::new("hyprctl")
+            .args(["repl", HELD_MODIFIERS_LUA])
+            .stderr(Stdio::null())
+            .output()
+            .map(|output| {
+                output.status.success() && String::from_utf8_lossy(&output.stdout).contains("held")
+            })
+            .unwrap_or(false);
+        if !held {
+            return;
+        }
+        if Instant::now() >= deadline {
+            tracing::warn!("修饰键一直按着，仍然发送按键");
+            return;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
 }
 
 #[derive(Debug)]
@@ -226,6 +257,7 @@ fn restore_clipboard(snapshot: Option<ClipboardSnapshot>) -> Result<()> {
 
 fn paste_with_available_backend() -> PasteBackend {
     if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
+        wait_for_released_modifiers(Duration::from_millis(1_500));
         match Command::new("hyprctl")
             .args(["eval", HYPRLAND_PASTE_LUA])
             .stdout(Stdio::null())

@@ -87,6 +87,9 @@ gs 'pactl list short modules | grep -q yuda_e2e_mic || pactl load-module module-
 pactl set-default-source yuda_e2e_mic.monitor'
 
 state() { gs 'yuda status --json | jq -r .state'; }
+# 修饰键卡住时，场景里的 Enter 会变成 Super+Ctrl+Enter 打开 Herdr；用它做回归检查。
+herdr_count() { gs 'pgrep -c -x herdr || true'; }
+herdr_before=$(herdr_count)
 history_count() { gs 'wc -l < ~/.local/state/yuda/history.jsonl 2>/dev/null || echo 0'; }
 
 wait_focus() {
@@ -454,6 +457,13 @@ fi
 gs 'yuda config set-string cloud.access_key ""'
 
 gs 'journalctl --user -u yuda.service --since "-10min" --no-pager -o short-precise' >"$artifacts/daemon.log" 2>&1 || true
+
+log "修饰键状态"
+if [[ $(herdr_count) == "$herdr_before" ]]; then
+    pass keys "没有修饰键卡住（Enter 没有被当成 Super+Ctrl+Enter）"
+else
+    fail keys "出现了 Super+Ctrl+Enter（Herdr 被打开），修饰键可能卡住"
+fi
 
 log "时延（松手 → 上屏）"
 latencies=$(sed -nE 's/.*已上屏.*latency_ms=([0-9]+).*/\1/p' "$artifacts/daemon.log" | tail -n 4)

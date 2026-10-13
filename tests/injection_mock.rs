@@ -200,6 +200,7 @@ fn hyprland_session_pastes_through_hyprctl_and_restores_clipboard() {
             "paste:--list-types",
             "paste:--no-newline --type text/plain;charset=utf-8",
             "copy:--type text/plain;charset=utf-8 --sensitive",
+            "hyprctl:repl",
             "hyprctl:eval",
             "copy:--type text/plain;charset=utf-8",
         ]
