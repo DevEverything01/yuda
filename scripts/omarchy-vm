@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+# 常驻的 Omarchy 开发/验收 VM（运行在带 /dev/kvm 的 Linux 宿主机上，例如印度机器）。
+# 基于官方每晚发布的预装镜像（https://nightly.omarchy.org/<channel>/latest.json），
+# 与官方 vm-boot 的区别：overlay 与 SSH 密钥持久保存，VM 后台常驻，可反复 SSH / QMP。
+#
+#   omarchy-vm fetch                 下载并校验最新镜像（edge 默认，OMARCHY_CHANNEL=stable 切换）
+#   omarchy-vm up                    启动（已在运行则跳过），等待 SSH 就绪
+#   omarchy-vm down                  ACPI 关机，超时则强制结束
+#   omarchy-vm reset                 删除 overlay，下次 up 得到全新系统
+#   omarchy-vm status                显示运行状态
+#   omarchy-vm ssh [cmd...]          以 omarchy 用户登录或执行命令（stdin 透传）
+#   omarchy-vm qmp '<json>'          发送一条 QMP 命令并打印应答
+#   omarchy-vm hold <qcode> <秒>     通过 QMP 虚拟键盘按住一个键（例如 f9、alt_r）
+#   omarchy-vm tap <qcode>...        通过 QMP 依次轻点按键
+#   omarchy-vm screenshot <file.png> 通过 QMP 截取整屏
+#
+# 环境变量：OMARCHY_CHANNEL(edge) YUDA_VM_ROOT(/var/lib/yuda-vm) YUDA_VM_SSH_PORT(2222)
+#           SMP(6) MEM(7G)
+set -euo pipefail
+
+channel=${OMARCHY_CHANNEL:-edge}
+root=${YUDA_VM_ROOT:-/var/lib/yuda-vm}
+image_dir=$root/images/$channel
+state=$root/state/$channel
+port=${YUDA_VM_SSH_PORT:-2222}
+key=$state/id_ed25519
+ssh_opts=(-i "$key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes
+    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
+
+die() {
+    printf 'omarchy-vm: %s\n' "$*" >&2
+    exit 1
+}
+
+running() {
+    [[ -f $state/qemu.pid ]] && kill -0 "$(cat "$state/qemu.pid")" 2>/dev/null
+}
+
+image_path() {
+    local name
+    name=$(jq -r '.vm.url' "$image_dir/latest.json")
+    printf '%s/%s\n' "$image_dir" "${name##*/}"
+}
+
+cmd_fetch() {
+    command -v jq >/dev/null || die "需要 jq"
+    mkdir -p "$image_dir"
+    cd "$image_dir"
+    curl -fsSL "https://nightly.omarchy.org/$channel/latest.json" -o latest.json
+    local unpacked url file
+    unpacked=$(jq -r '.vm.unpacked' latest.json)
+    for file in $(jq -r '.vm.unpacked_files[]' latest.json); do
+        curl -fsSLO "$unpacked$file"
+    done
+    sha256sum -c SHA256SUMS
+    url=$(jq -r '.vm.url' latest.json)
+    if [[ ! -f ${url##*/} ]] || ! sha256sum -c "${url##*/}.sha256" >/dev/null 2>&1; then
+        curl -fSLO "$url"
+        curl -fsSLO "$url.sha256"
+    fi
+    sha256sum -c "${url##*/}.sha256"
+    jq -r '"Omarchy \(.omarchy_version)（\(.channel)，镜像 \(.version)）"' latest.json
+}
+
+cmd_up() {
+    [[ -r /dev/kvm && -w /dev/kvm ]] || die "/dev/kvm 不可用"
+    [[ -f $image_dir/latest.json ]] || die "镜像不存在，先运行 omarchy-vm fetch"
+    mkdir -p "$state"
+    if running; then
+        printf '%s\n' "VM 已在运行（SSH 127.0.0.1:$port）"
+        return 0
+    fi
+    local disk
+    disk=$(image_path)
+    [[ -s $disk ]] || die "镜像缺失：$disk"
+    if [[ ! -f $state/run.qcow2 ]]; then
+        qemu-img create -qf qcow2 -b "$disk" -F qcow2 "$state/run.qcow2"
+    fi
+    if [[ ! -f $key ]]; then
+        ssh-keygen -q -t ed25519 -N '' -C yuda-vm -f "$key"
+    fi
+    if [[ ! -f $state/machine-uuid ]]; then
+        cat /proc/sys/kernel/random/uuid >"$state/machine-uuid"
+    fi
+    # 与官方 vm-boot 相同：通过 systemd credential 在每次启动时写入 authorized_keys。
+    local creds
+    creds=$(printf 'd /home/omarchy/.ssh 0700 omarchy omarchy -\nf+ /home/omarchy/.ssh/authorized_keys 0600 omarchy omarchy - %s\n' \
+        "$(cat "$key.pub")" | base64 -w0)
+    rm -f "$state/qmp.sock"
+    qemu-system-x86_64 -cpu host -enable-kvm -machine q35,accel=kvm \
+        -smp "${SMP:-6}" -m "${MEM:-7G}" \
+        -kernel "$image_dir/vmlinuz" -initrd "$image_dir/initrd" \
+        -append "$(cat "$image_dir/cmdline")" \
+        -uuid "$(cat "$state/machine-uuid")" \
+        -drive "file=$state/run.qcow2,format=qcow2,if=none,id=d0" -device virtio-blk-pci,drive=d0 \
+        -smbios "type=11,value=io.systemd.credential.binary:tmpfiles.extra=$creds" \
+        -device virtio-vga -device virtio-rng-pci -display none \
+        -device qemu-xhci -device usb-kbd -device usb-tablet \
+        -netdev "user,id=n0,hostfwd=tcp:127.0.0.1:$port-:22" -device virtio-net-pci,netdev=n0 \
+        -qmp "unix:$state/qmp.sock,server,nowait" \
+        -serial "file:$state/serial.log" \
+        -pidfile "$state/qemu.pid" -daemonize
+    local deadline=$((SECONDS + 300))
+    until ssh "${ssh_opts[@]}" -o ConnectTimeout=2 omarchy@127.0.0.1 true </dev/null 2>/dev/null; do
+        running || die "qemu 在 SSH 就绪前退出，见 $state/serial.log"
+        ((SECONDS < deadline)) || die "300 秒内 SSH 未就绪"
+        sleep 1
+    done
+    printf '%s\n' "VM 已就绪：omarchy-vm ssh（127.0.0.1:$port，桌面/sudo 密码 omarchy）"
+}
+
+cmd_down() {
+    running || {
+        printf '%s\n' 'VM 未运行'
+        return 0
+    }
+    cmd_qmp '{"execute":"system_powerdown"}' >/dev/null || true
+    local pid deadline=$((SECONDS + 60))
+    pid=$(cat "$state/qemu.pid")
+    while kill -0 "$pid" 2>/dev/null && ((SECONDS < deadline)); do
+        sleep 1
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid"
+    fi
+    rm -f "$state/qemu.pid"
+}
+
+cmd_reset() {
+    cmd_down
+    rm -f "$state/run.qcow2" "$state/machine-uuid"
+}
+
+cmd_status() {
+    if running; then
+        printf 'running pid=%s ssh=127.0.0.1:%s qmp=%s\n' "$(cat "$state/qemu.pid")" "$port" "$state/qmp.sock"
+    else
+        printf '%s\n' stopped
+    fi
+}
+
+cmd_ssh() {
+    running || die "VM 未运行"
+    ssh "${ssh_opts[@]}" omarchy@127.0.0.1 "$@"
+}
+
+# QMP 需要先协商能力；每次调用都是一条独立连接。
+cmd_qmp() {
+    running || die "VM 未运行"
+    command -v socat >/dev/null || die "需要 socat"
+    local payload
+    payload=$(printf '{"execute":"qmp_capabilities"}\n%s\n' "$*")
+    printf '%s\n' "$payload" | socat -t 2 - "UNIX-CONNECT:$state/qmp.sock" | tail -n +3
+}
+
+key_event() {
+    local code=$1 down=$2
+    cmd_qmp "{\"execute\":\"input-send-event\",\"arguments\":{\"events\":[{\"type\":\"key\",\"data\":{\"down\":$down,\"key\":{\"type\":\"qcode\",\"data\":\"$code\"}}}]}}" >/dev/null
+}
+
+cmd_hold() {
+    (($# == 2)) || die "用法：omarchy-vm hold <qcode> <秒>"
+    key_event "$1" true
+    sleep "$2"
+    key_event "$1" false
+}
+
+cmd_tap() {
+    local code
+    for code in "$@"; do
+        key_event "$code" true
+        sleep 0.05
+        key_event "$code" false
+        sleep 0.05
+    done
+}
+
+cmd_screenshot() {
+    (($# == 1)) || die "用法：omarchy-vm screenshot <file.png>"
+    local target
+    target=$(realpath -m "$1")
+    cmd_qmp "{\"execute\":\"screendump\",\"arguments\":{\"filename\":\"$target\",\"format\":\"png\"}}" >/dev/null
+    sleep 0.5
+    [[ -s $target ]] || die "截图失败：$target"
+    printf '%s\n' "$target"
+}
+
+command=${1:-}
+shift || true
+case "$command" in
+    fetch | up | down | reset | status | ssh | qmp | hold | tap | screenshot) "cmd_$command" "$@" ;;
+    *)
+        sed -n '2,20p' "$0" >&2
+        exit 2
+        ;;
+esac

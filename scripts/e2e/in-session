@@ -1,0 +1,19 @@
+#!/bin/bash
+# 以当前用户 Hyprland 会话的环境变量执行命令（SSH 进入 VM 时没有这些变量）。
+pid=$(pgrep -u "$USER" -x Hyprland | head -1)
+if [[ -z $pid ]]; then
+  echo "in-session: Hyprland is not running for $USER" >&2
+  exit 1
+fi
+while IFS= read -r -d '' kv; do
+  case "$kv" in
+    WAYLAND_DISPLAY=* | XDG_RUNTIME_DIR=* | DBUS_SESSION_BUS_ADDRESS=* | OMARCHY_PATH=* | PATH=* | XDG_CURRENT_DESKTOP=* | XDG_SESSION_TYPE=* | XDG_CONFIG_DIRS=* | XDG_DATA_DIRS=*) export "$kv" ;;
+  esac
+done </proc/"$pid"/environ
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}"
+if [[ -z ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; then
+  HYPRLAND_INSTANCE_SIGNATURE=$(ls -t "$XDG_RUNTIME_DIR/hypr" 2>/dev/null | head -1)
+  export HYPRLAND_INSTANCE_SIGNATURE
+fi
+exec "$@"

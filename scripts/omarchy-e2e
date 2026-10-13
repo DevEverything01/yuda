@@ -1,0 +1,265 @@
+#!/usr/bin/env bash
+# 语打 × Omarchy 端到端验收（T3）。在 KVM 宿主机的仓库根目录运行，VM 由 scripts/omarchy-vm 管理。
+#
+#   scripts/omarchy-e2e              同步源码 → VM 内构建、安装、运行 omarchy-install-dictation-yuda → 全部场景
+#   scripts/omarchy-e2e --no-build   复用 VM 里已安装的语打，只跑场景
+#
+# 触发走 Omarchy 自己的听写快捷键：QMP 虚拟键盘在宿主侧按键（Omarchy 验收指南指出
+# VM 内的 wtype 不能证明全局快捷键可用）。语音是 SenseVoice 自带的测试音频，播进
+# PipeWire 虚拟麦克风，与真实麦克风走同一条 cpal → PipeWire 采集链路。
+#
+#   A  按住 F9          → 文本进入 foot 终端（Ctrl+Shift+V），原剪贴板恢复，历史新增一条
+#   B  按住 Right Alt   → 英文进入 GTK4 窗口（Ctrl+V）
+#   C  Super+Ctrl+X 两次 → 切换模式录一段粤语
+#   D  轻点 F9（<300ms） → 不识别、不上屏
+#   E  按住但不说话      → 「没有识别到语音」，不上屏
+#
+# 截图与 daemon 日志写入 target/e2e/。
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+artifacts=${YUDA_E2E_ARTIFACTS:-$PWD/target/e2e}
+mkdir -p "$artifacts"
+build=1
+[[ ${1:-} == "--no-build" ]] && build=0
+
+vm() { scripts/omarchy-vm "$@"; }
+# 在 VM 的桌面会话里执行一段 bash（脚本走 stdin）。
+gs() { vm ssh '~/.local/bin/yuda-e2e-session bash -s' <<<"$1"; }
+log() { printf '\n\e[1m== %s\e[0m\n' "$*"; }
+
+failures=0
+pass() { printf '\e[32mPASS\e[0m %s %s\n' "$1" "$2"; }
+fail() {
+    printf '\e[31mFAIL\e[0m %s %s\n' "$1" "$2"
+    failures=$((failures + 1))
+}
+
+wavs='$HOME/.local/share/yuda/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/test_wavs'
+
+vm up >/dev/null
+vm ssh 'mkdir -p ~/.local/bin /tmp/yuda-e2e'
+vm ssh 'cat > ~/.local/bin/yuda-e2e-session && chmod +x ~/.local/bin/yuda-e2e-session' <scripts/e2e/in-session
+
+if ((build)); then
+    log "同步源码"
+    tar --exclude=./target --exclude=./.git --exclude=./.claude -czf - . |
+        vm ssh 'rm -rf ~/yuda-e2e && mkdir -p ~/yuda-e2e && tar -xzf - -C ~/yuda-e2e'
+    log "构建依赖"
+    vm ssh 'echo omarchy | sudo -S -v 2>/dev/null && sudo pacman -Sy --noconfirm --needed rust clang cmake alsa-lib pkgconf >/dev/null'
+    log "构建并安装（PREFIX=/usr/local）"
+    vm ssh 'cd ~/yuda-e2e && cargo build --release --locked --features daemon 2>&1 | tail -1 && echo omarchy | sudo -S -v 2>/dev/null && sudo make install PREFIX=/usr/local >/dev/null'
+    log "omarchy-install-dictation-yuda（无人值守）"
+    gs 'YUDA_NONINTERACTIVE=1 omarchy-install-dictation-yuda'
+fi
+
+log "集成检查"
+if gs '[[ $(omarchy-default-dictation) == yuda ]]'; then
+    pass setup "Omarchy 默认听写后端 = yuda"
+else
+    fail setup "Omarchy 默认听写后端不是 yuda"
+fi
+if gs 'hyprctl binds -j | jq -e "[.[] | select(.arg | test(\"omarchy-dictation\"))] | length >= 5" >/dev/null'; then
+    pass setup "F9 / Right Alt / Super+Ctrl+X 绑定已加载"
+else
+    fail setup "Hyprland 中缺少听写快捷键"
+fi
+if gs 'systemctl --user is-active --quiet yuda.service'; then
+    pass setup "yuda.service 运行中"
+else
+    fail setup "yuda.service 未运行"
+fi
+if gs 'grep -q "setup.default.dictation.yuda" ~/.config/omarchy/extensions/omarchy-menu.jsonc'; then
+    pass setup "Omarchy 菜单扩展已合并"
+else
+    fail setup "Omarchy 菜单扩展缺少语打条目"
+fi
+
+# PipeWire 虚拟麦克风：null sink 的 monitor 设为默认输入。
+gs 'pactl list short modules | grep -q yuda_e2e_mic || pactl load-module module-null-sink sink_name=yuda_e2e_mic sink_properties=device.description=YudaE2EMic >/dev/null
+pactl set-default-source yuda_e2e_mic.monitor'
+
+state() { gs 'yuda status --json | jq -r .state'; }
+history_count() { gs 'wc -l < ~/.local/state/yuda/history.jsonl 2>/dev/null || echo 0'; }
+
+wait_focus() {
+    local title=$1
+    for _ in $(seq 1 40); do
+        if [[ $(gs 'hyprctl activewindow -j | jq -r .title') == "$title" ]]; then
+            return 0
+        fi
+        sleep 0.25
+    done
+    return 1
+}
+
+# 等待会话离开录音态并回到空闲。
+wait_idle() {
+    local deadline=$((SECONDS + ${1:-20}))
+    sleep 0.5
+    while ((SECONDS < deadline)); do
+        [[ $(state) == idle ]] && return 0
+        sleep 0.3
+    done
+    return 1
+}
+
+# speak <wav>：在 VM 内把音频播进虚拟麦克风（后台）。
+speak() { gs "pw-play --target yuda_e2e_mic $wavs/$1" & }
+
+open_terminal() {
+    local title=$1 out=$2
+    gs "rm -f $out; setsid -f foot --title $title sh -c 'cat > $out' >/dev/null 2>&1"
+    wait_focus "$title"
+}
+
+close_target() { gs "pkill -f -- '$1' || true"; }
+
+log "A 按住 F9 → foot 终端"
+out=/tmp/yuda-e2e/a.txt
+if open_terminal yuda-e2e-a "$out"; then
+    gs 'printf %s yuda-e2e-sentinel | wl-copy'
+    before=$(history_count)
+    vm hold f9 7.5 &
+    hold=$!
+    sleep 0.7
+    speak zh.wav
+    sleep 3
+    vm screenshot "$artifacts/a-recording.png" >/dev/null
+    wait "$hold"
+    if wait_idle 20; then
+        vm screenshot "$artifacts/a-after.png" >/dev/null
+        vm tap ret
+        sleep 1
+        text=$(gs "cat $out")
+        if [[ $text == *开饭时间* ]]; then
+            pass A "终端收到：$text"
+        else
+            fail A "终端内容不符：「$text」"
+        fi
+        if [[ $(gs 'wl-paste --no-newline') == yuda-e2e-sentinel ]]; then
+            pass A "原剪贴板已恢复"
+        else
+            fail A "原剪贴板没有恢复"
+        fi
+        if (($(history_count) == before + 1)); then
+            pass A "历史新增一条"
+        else
+            fail A "历史条数没有加一"
+        fi
+    else
+        fail A "20 秒内没有回到空闲"
+    fi
+    close_target "cat > $out"
+else
+    fail A "foot 窗口没有获得焦点"
+fi
+
+log "B 按住 Right Alt → GTK4 窗口"
+out=/tmp/yuda-e2e/b.txt
+gs "rm -f $out; setsid -f python3 ~/yuda-e2e/scripts/e2e/text-probe.py yuda-e2e-b $out >/dev/null 2>&1"
+if wait_focus yuda-e2e-b; then
+    vm hold alt_r 7.5 &
+    hold=$!
+    sleep 0.7
+    speak en.wav
+    wait "$hold"
+    if wait_idle 20; then
+        sleep 0.5
+        vm screenshot "$artifacts/b-after.png" >/dev/null
+        text=$(gs "cat $out 2>/dev/null")
+        if [[ $text == *"tribal chieftain"* ]]; then
+            pass B "GTK 窗口收到：$text"
+        else
+            fail B "GTK 窗口内容不符：「$text」"
+        fi
+    else
+        fail B "20 秒内没有回到空闲"
+    fi
+    close_target "text-probe.py yuda-e2e-b"
+else
+    fail B "GTK 探针窗口没有获得焦点"
+fi
+
+toggle() {
+    vm qmp '{"execute":"send-key","arguments":{"keys":[{"type":"qcode","data":"meta_l"},{"type":"qcode","data":"ctrl"},{"type":"qcode","data":"x"}],"hold-time":120}}' >/dev/null
+}
+
+log "C Super+Ctrl+X 切换 → 粤语"
+out=/tmp/yuda-e2e/c.txt
+if open_terminal yuda-e2e-c "$out"; then
+    toggle
+    sleep 0.7
+    if [[ $(state) == recording ]]; then
+        pass C "切换键开始录音"
+    else
+        fail C "切换键没有开始录音"
+    fi
+    speak yue.wav
+    sleep 5.5
+    toggle
+    if wait_idle 20; then
+        vm tap ret
+        sleep 1
+        text=$(gs "cat $out")
+        if [[ $text == *表达* ]]; then
+            pass C "终端收到：$text"
+        else
+            fail C "终端内容不符：「$text」"
+        fi
+    else
+        fail C "20 秒内没有回到空闲"
+    fi
+    close_target "cat > $out"
+else
+    fail C "foot 窗口没有获得焦点"
+fi
+
+log "D 轻点 F9（<300ms）"
+out=/tmp/yuda-e2e/d.txt
+if open_terminal yuda-e2e-d "$out"; then
+    before=$(history_count)
+    vm hold f9 0.12
+    sleep 2
+    vm tap ret
+    sleep 0.5
+    text=$(gs "cat $out")
+    if [[ -z $text && $(history_count) == "$before" && $(state) == idle ]]; then
+        pass D "误触被忽略"
+    else
+        fail D "误触产生了输出：「$text」"
+    fi
+    close_target "cat > $out"
+else
+    fail D "foot 窗口没有获得焦点"
+fi
+
+log "E 按住不说话"
+out=/tmp/yuda-e2e/e.txt
+if open_terminal yuda-e2e-e "$out"; then
+    before=$(history_count)
+    vm hold f9 2.5
+    sleep 0.6
+    seen=$(gs 'yuda status --json | jq -r .message')
+    wait_idle 10 || true
+    vm tap ret
+    sleep 0.5
+    text=$(gs "cat $out")
+    if [[ -z $text && $(history_count) == "$before" ]]; then
+        pass E "静音不上屏（提示：${seen:-无}）"
+    else
+        fail E "静音产生了输出：「$text」"
+    fi
+    close_target "cat > $out"
+else
+    fail E "foot 窗口没有获得焦点"
+fi
+
+gs 'journalctl --user -u yuda.service --since "-10min" --no-pager -o short-precise' >"$artifacts/daemon.log" 2>&1 || true
+log "结果"
+if ((failures == 0)); then
+    printf '全部通过。截图与日志：%s\n' "$artifacts"
+else
+    printf '%d 项失败。截图与日志：%s\n' "$failures" "$artifacts"
+    exit 1
+fi

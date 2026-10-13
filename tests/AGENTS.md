@@ -21,7 +21,7 @@
   ```toml
   [[test]]
   name = "cloud_protocol"
-  required-features = ["linux-runtime"]
+  required-features = ["cloud"]
   ```
 
 - `injection` 等未 gate 的模块，其集成测试必须在默认 features 下可跑——**默认 features 全绿是底线**（macOS 开发机也要能跑 `cargo test`）。
@@ -49,7 +49,7 @@
 ## 提交前验证
 
 ```bash
-cargo test --locked --features linux-runtime            # 全量（Linux）
+cargo test --locked --features daemon                   # 全量（Linux，需 sherpa-onnx 原生库）
 cargo test --locked                                     # 默认 features 底线（任意平台）
 ```
 
