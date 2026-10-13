@@ -6,6 +6,16 @@
 - 屏幕底部的录音胶囊实时显示波形和识别中的文字，颜色跟随 Omarchy 主题。
 - 云端用火山引擎豆包语音大模型（与豆包输入法同款）；断网或未配置时自动用本地 SenseVoice 模型，**不联网也能用**。
 
+| 录音中（Tokyo Night） | 录音中（Catppuccin Latte） | 云端不可用，自动离线 |
+|---|---|---|
+| ![录音胶囊](docs/images/capsule-tokyo-night.png) | ![浅色主题](docs/images/capsule-catppuccin-latte.png) | ![离线徽标](docs/images/capsule-offline.png) |
+
+| Setup › Defaults › Dictation | Setup › Yuda 语打 |
+|---|---|
+| ![默认听写后端](docs/images/menu-default-dictation.png) | ![语打设置菜单](docs/images/menu-yuda.png) |
+
+以上截图来自 Omarchy 官方 edge VM 镜像中的真实运行（`scripts/omarchy-e2e`）。
+
 ## 与豆包输入法对照
 
 | 能力 | 语打 | 说明 |
@@ -21,7 +31,7 @@
 | 热词 | ✓ | 云端引擎 `hotwords` |
 | AI 纠错 | ✓ | 任意 OpenAI 兼容端点；只修同音字和误识别的术语，超时直接上屏原文 |
 | 豆包大模型识别 | ◐ | 已按官方协议实现并通过本地协议测试；尚未用真实密钥联调 |
-| 离线识别 | ✓ | SenseVoice-Small int8，本机 CPU，5 秒语音约 0.3 秒出结果 |
+| 离线识别 | ✓ | SenseVoice-Small int8，本机 CPU；松手到上屏实测 0.23–0.72 秒 |
 | 识别历史、重新上屏 | ✓ | 只存本机，`yuda history`、菜单「历史记录 · 重新上屏」 |
 | 终端里也能上屏 | ✓ | 与 Omarchy 的 Super+V 同一路径，终端自动用 Ctrl+Shift+V |
 | 不污染剪贴板 | ✓ | 上屏后恢复原剪贴板；临时内容标记为敏感，不进剪贴板历史 |
