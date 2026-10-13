@@ -55,7 +55,7 @@ scripts/omarchy-vm screenshot /tmp/x.png
 
 场景（详见脚本头部）：A 按住 F9 → foot 终端；B 按住 Right Alt → GTK4 窗口；C Super+Ctrl+X 切换 → 粤语（切换语言后使用 SenseVoice）；D 轻点 F9 不上屏；E 静音不上屏；F 无效云端密钥 → 自动离线；G 按住 Shift+F9 说「把九点改成十点」；H Super+Ctrl+Shift+X 说「删掉上一句」；I 自然语音中英混输（技术名词）；J `yuda edit 最后加上问号`；K AI 自由指令（模拟 OpenAI 兼容端点）。另有剪贴板历史、修饰键是否卡住（Herdr 进程数）与松手到上屏时延（< 3 s）三项全局检查。G、H、I 的语音由宿主机 edge-tts 生成，生成失败时记为 SKIP。
 
-最近一次结果（2026-10-14，印度宿主机，Omarchy edge `4.0.0.r6942.gf5006bd`，Hyprland 0.56.2，安装路径与软件包相同）：集成检查 4 项、场景 A–K 与三项全局检查全部通过，连续多轮稳定；松手到上屏 255 / 254 / 346 / 246 ms。`makepkg` 构建的 `yuda-git` 软件包经 `pacman -U` 安装后同样全部通过。另行手工验证：Omarchy 菜单两处条目与勾选状态、`omarchy-menu-select` 切换语言后 daemon 热加载、卸载后重装、Catppuccin Latte 主题下胶囊配色跟随。
+最近一次结果（2026-10-14，印度宿主机，Omarchy edge `4.0.0.r6942.gf5006bd`，Hyprland 0.56.2，安装路径与软件包相同）：集成检查 4 项、场景 A–K 与三项全局检查全部通过，连续多轮稳定；松手到上屏 255 / 254 / 346 / 246 ms。`makepkg` 构建的 `yuda-git` 软件包经 `pacman -U` 安装后同样全部通过。另行手工验证：从旧版 `b3b779a` 升级（`/usr/local` 安装的旧二进制与旧单元、挂在 `default.target` 的旧链接、旧键名与占位密钥的配置），安装器清理残留、迁移配置后服务正常、`yuda doctor` 全部通过、端到端 A–K 全部通过；Omarchy 菜单两处条目与勾选状态、`omarchy-menu-select` 切换语言后 daemon 热加载、卸载后重装、Catppuccin Latte 主题下胶囊配色跟随。
 
 未覆盖：真实麦克风硬件、实体键盘布局（AltGr）、GPU 渲染下的动画性能——在实体 Omarchy 机器上抽查。云端识别没有真实密钥时只能由 T2 覆盖协议。
 
