@@ -354,4 +354,29 @@ mod tests {
         let raw = toml::to_string(&config).expect("config should serialize");
         assert!(raw.contains("api_key = \"\""));
     }
+    #[cfg(unix)]
+    #[test]
+    fn saved_config_permissions_are_private() {
+        let directory = tempfile::tempdir().expect("temporary config directory should exist");
+        let path = directory.path().join("config.toml");
+        Config::default().save(&path).expect("config should save");
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(path)
+            .expect("saved config metadata should exist")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "config must not be readable by other users");
+    }
+
+    #[test]
+    fn invalid_toml_reports_the_config_path() {
+        let directory = tempfile::tempdir().expect("temporary config directory should exist");
+        let path = directory.path().join("broken.toml");
+        fs::write(&path, "[broken").expect("broken config should be written");
+        let error = Config::load(&path).expect_err("broken TOML should fail");
+        let message = format!("{error:#}");
+        assert!(message.contains("解析配置失败"));
+        assert!(message.contains(path.to_string_lossy().as_ref()));
+    }
 }

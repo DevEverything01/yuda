@@ -18,6 +18,10 @@ use crate::{
 const MIN_HOLD: Duration = Duration::from_millis(300);
 const POST_RECORDING_DELAY: Duration = Duration::from_millis(20);
 
+fn hold_is_usable(held_for: Duration) -> bool {
+    held_for >= MIN_HOLD
+}
+
 pub fn run() -> Result<()> {
     let config_path = Config::default_path().context("无法确定 HOME，不能加载 Yuda 配置")?;
     let config = Config::load(&config_path)
@@ -86,7 +90,7 @@ fn handle_recording(
             handle_recording(config, recognizer, listener, session, recorder)
         }
         HotkeyAction::Released { held_for } => {
-            if held_for < MIN_HOLD {
+            if !hold_is_usable(held_for) {
                 tracing::info!(held_ms = held_for.as_millis(), "忽略短按");
                 session.reset();
                 drop(recorder);
@@ -157,4 +161,16 @@ fn temporary_wav_path() -> Result<PathBuf> {
         anyhow::bail!("临时录音路径已存在: {}", path.display());
     }
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hold_is_usable;
+    use std::time::Duration;
+
+    #[test]
+    fn accepts_exact_minimum_hold_and_rejects_one_tick_below() {
+        assert!(!hold_is_usable(Duration::from_millis(299)));
+        assert!(hold_is_usable(Duration::from_millis(300)));
+    }
 }

@@ -1,0 +1,74 @@
+# Manifest contract: checked-in metadata only; audio stays gitignored and local.
+# Public baseline provenance is documented in evals/AGENTS.md; these entries are
+# placeholders for manually recorded product-domain samples.
+# 持续性真实音频评估清单。
+# 音频本体放 evals/asr/corpus/<scenario>/，被 .gitignore 排除；不要提交录音。
+# 每个文件必须由人工录音并人工校对 transcript，不能用合成音/识别结果冒充 ground truth。
+
+default_max_cer = 0.15
+
+[[sample]]
+file = "corpus/coding/short-rust.wav"
+scenario = "coding"
+lang = "zh"
+tags = ["short", "technical"]
+transcript = "写一个 Rust 函数"
+max_cer = 0.20
+
+[[sample]]
+file = "corpus/coding/mixed-python-json-git.wav"
+scenario = "coding"
+lang = "zh"
+tags = ["technical"]
+transcript = "用 Python 读取 JSON，然后提交到 Git"
+max_cer = 0.20
+
+[[sample]]
+file = "corpus/coding/numbers-punctuation.wav"
+scenario = "coding"
+lang = "zh"
+tags = ["technical", "numbers-punctuation"]
+transcript = "端口 8080，超时 2.5 秒，返回 HTTP 200。"
+max_cer = 0.20
+
+[[sample]]
+file = "corpus/chat/short-weekend.wav"
+scenario = "chat"
+lang = "zh"
+tags = ["short"]
+transcript = "周末一起吃饭吗？"
+
+[[sample]]
+file = "corpus/chat/noisy-background.wav"
+scenario = "chat"
+lang = "zh"
+tags = ["noise"]
+transcript = "我晚一点到，先不用等我。"
+
+[[sample]]
+file = "corpus/chat/silence-trim.wav"
+scenario = "chat"
+lang = "zh"
+tags = ["silence-trim"]
+transcript = "好的，收到。"
+
+[[sample]]
+file = "corpus/email/long-project-update.wav"
+scenario = "email"
+lang = "zh"
+tags = ["long"]
+transcript = "你好，这封邮件同步一下本周的项目进展，语音识别模块已经完成联调，下周进入灰度测试，请大家在周五之前反馈问题。"
+
+[[sample]]
+file = "corpus/email/numbers-punctuation.wav"
+scenario = "email"
+lang = "zh"
+tags = ["numbers-punctuation"]
+transcript = "本次发布计划为 8 月 24 日 18:00，版本号是 v0.1.0，请确认上线窗口。"
+
+[[sample]]
+file = "corpus/email/technical-mixed.wav"
+scenario = "email"
+lang = "zh"
+tags = ["technical"]
+transcript = "附件中的 API 文档已经更新，示例包含 Rust、Python 和 JSON 请求。"

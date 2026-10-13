@@ -1,0 +1,108 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: # 手动触发时连 Omarchy 真机层一起跑
+  schedule:
+    - cron: "17 2 * * *" # 每日夜间 UTC 02:17；真机层不阻塞 PR
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# 分层对应 docs/testing.md：
+#   hosted 层 = T0 + T1（默认 features / linux-runtime），每次 PR 必过
+#   omarchy 层 = daemon 全量 + T3 真机冒烟 + ASR 准确性评估，仅手动/夜间触发，不阻塞 PR
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --check
+
+  default-features:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+
+  linux-runtime:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: 安装工具链（checkout 需要 git，cpal 需要 alsa）
+        run: pacman -Syu --noconfirm --needed base-devel git rust alsa-lib
+      - uses: actions/checkout@v4
+      - name: 缓存 target（sherpa-onnx 之外也省时间）
+        uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --locked --features linux-runtime --all-targets -- -D warnings
+      - run: cargo test --locked --features linux-runtime
+
+  # 需要：在 Omarchy 机器上注册 self-hosted runner，label 含 "omarchy"，
+  # 且 runner 用户处于已登录的 Hyprland 会话（T3 需要真实 Wayland/evdev/剪贴板）。
+  omarchy-e2e:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    timeout-minutes: 20
+    runs-on: [self-hosted, omarchy]
+    env:
+      YUDA_E2E_TRIGGER: ${{ vars.YUDA_E2E_TRIGGER }}
+      YUDA_E2E_MODEL_DIR: ${{ vars.YUDA_E2E_MODEL_DIR }}
+      YUDA_ASR_CONFIG: ${{ vars.YUDA_ASR_CONFIG }}
+      YUDA_ASR_MANIFEST: ${{ vars.YUDA_ASR_MANIFEST }}
+      YUDA_ASR_ENABLE_FILE: ${{ vars.YUDA_ASR_ENABLE_FILE }}
+      YUDA_ASR_MODEL_DIR: ${{ vars.YUDA_ASR_MODEL_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: daemon 全量（含 sherpa-onnx static，runner 本地保留 target 缓存）
+        run: cargo test --locked --features daemon
+      - name: 本机冒烟（test + clippy + 边界用例）
+        run: scripts/perf_smoke.sh
+      - name: 真机 T3 冒烟（uinput 热键 + 剪贴板往返）
+        run: |
+          if [[ -z "${YUDA_E2E_TRIGGER:-}" ]]; then
+            printf '%s\n' '::warning::未配置 YUDA_E2E_TRIGGER，跳过非交互 CI 的 T3 真机输入；本地交互运行 scripts/hyprland_smoke.sh。'
+            exit 0
+          fi
+          scripts/hyprland_smoke.sh
+      - name: 检查本机 ASR 语料是否已启用
+        id: asr-corpus
+        run: |
+          set -euo pipefail
+          manifest="${YUDA_ASR_MANIFEST:-evals/asr/corpus.toml}"
+          marker="${YUDA_ASR_ENABLE_FILE:-$HOME/.config/yuda/asr-evals.enabled}"
+          report="$RUNNER_TEMP/yuda-asr-report.md"
+          if [[ -f "$manifest" && -f "$marker" ]]; then
+            printf 'available=true\nmanifest=%s\nreport=%s\n' "$manifest" "$report" >>"$GITHUB_OUTPUT"
+          else
+            printf 'available=false\nmanifest=%s\nreport=%s\n' "$manifest" "$report" >>"$GITHUB_OUTPUT"
+            printf '::warning::未找到已启用的 ASR 真实语料，跳过准确性评估（manifest=%s marker=%s）\n' "$manifest" "$marker"
+          fi
+      - name: ASR 多场景准确性评估
+        if: steps.asr-corpus.outputs.available == 'true'
+        env:
+          YUDA_ASR_MANIFEST: ${{ steps.asr-corpus.outputs.manifest }}
+          YUDA_ASR_REPORT: ${{ steps.asr-corpus.outputs.report }}
+        run: cargo test --locked --features daemon --test asr_accuracy -- --ignored --nocapture
+      - name: 上传 ASR 评估报告
+        if: always() && steps.asr-corpus.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: yuda-asr-report-${{ github.run_id }}
+          path: ${{ steps.asr-corpus.outputs.report }}
+          if-no-files-found: warn
+      - name: 报告 ASR 评估未启用
+        if: steps.asr-corpus.outputs.available != 'true'
+        run: printf '%s\n' 'ASR 评估未启用：先在 Omarchy 配置真实语料并创建 enable marker。'

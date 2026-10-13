@@ -220,4 +220,11 @@ mod tests {
         assert_eq!(steps[2].detail, "保留在剪贴板");
         assert_eq!(steps[3].detail, "立即恢复");
     }
+
+    #[test]
+    fn rejects_whitespace_without_touching_clipboard() {
+        let error = super::inject_text(" \n\t", std::time::Duration::ZERO)
+            .expect_err("whitespace-only input must be rejected");
+        assert_eq!(error.to_string(), "拒绝上屏空文本");
+    }
 }

@@ -20,3 +20,9 @@ config.local.toml
 
 # 系统杂物
 .DS_Store
+# 一次性/调试测试（见 tests/AGENTS.md 纪律）
+/.scratch/
+
+# ASR 准确性评估：语料音频与报告不进仓库，只提交 corpus.toml 清单（见 evals/AGENTS.md）
+/evals/asr/corpus/
+/evals/asr/reports/

@@ -9,6 +9,7 @@
 - 产品定义与实现规格：`PROMPT.md`（唯一权威实现提示词）
 - 调研结论：`docs/research.md`
 - 架构总览：`docs/architecture.md`
+- 测试体系：`docs/testing.md`（`tests/` 目录规范见 `tests/AGENTS.md`）
 - 里程碑：`docs/roadmap.md`
 - 重大决策记录：`docs/adr/`
 
@@ -30,6 +31,8 @@ yuda/
 │   └── adr/             # 架构决策记录，编号递增，不可复用
 ├── packaging/           # PKGBUILD 等打包文件（makepkg 的 src/ 会与 Rust src/ 冲突，严禁放仓库根目录构建）
 ├── examples/            # config.example.toml 等示例（不含真实密钥）
+├── tests/               # 可复用集成/契约测试（目录规范见 tests/AGENTS.md）
+├── evals/               # 持续性质量评估与外部语料（目录规范见 evals/AGENTS.md）
 └── src/                 # Rust 源码（首个代码 PR 建立）
 ```
 

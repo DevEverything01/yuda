@@ -2,19 +2,19 @@
 
 ## M0 — 技术验证 spike（1–2 天）
 
-- [ ] sherpa-onnx + SenseVoice-Small int8 在目标 Omarchy 机器上跑通中文识别（实测准确率/延迟/CPU 占用）
+- [ ] sherpa-onnx + SenseVoice-Small int8 在目标 Omarchy 机器上跑通中文识别（公开 AISHELL-1 基线已跑通；产品真人语料仍待采集）
 - [ ] 火山引擎豆包流式 ASR WebSocket 连通性（申请 appid/token，跑通双向流式 + 部分结果回调）
-- [ ] evdev 热键监听 + wtype/wl-clipboard 上屏的最小可行性验证
+- [x] evdev 热键监听 + wtype/wl-clipboard 上屏的最小可行性验证（Omarchy daemon 监听已验证；完整真实语音上屏需运行 T3 脚本）
 
 ## M1 — 自用骨架（第 1–2 周）
 
 按住说 → 录音 → 云端 ASR → 上屏全链路，无悬浮条 UI（notify-send 显示状态）。
 
-- [ ] evdev 全局热键（alone-press 判定、300ms 防抖、input 组检查）
-- [ ] cpal + rubato 音频管线
+- [x] evdev 全局热键（alone-press 判定、300ms 防抖、input 组检查）
+- [x] cpal + rubato 音频管线
 - [ ] 云端 ASR 客户端（流式，部分结果暂存）
-- [ ] 剪贴板快照/注入/恢复
-- [ ] config.toml 加载（0600）
+- [x] 剪贴板快照/注入/恢复
+- [x] config.toml 加载（0600）
 
 ## M2 — 产品化（第 3–4 周）
 

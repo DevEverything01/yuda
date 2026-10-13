@@ -1,7 +1,7 @@
 APP := yuda
 PREFIX ?= /usr/local
 
-.PHONY: build run install uninstall clean lint fmt ui
+.PHONY: build run install uninstall clean lint fmt ui test test-linux test-daemon check hooks smoke
 
 build:
 	cargo build --release --features daemon
@@ -23,7 +23,24 @@ clean:
 	cargo clean
 
 lint:
-	cargo clippy -- -D warnings
+	cargo clippy --locked --all-targets -- -D warnings
+
+test:
+	cargo test --locked
+
+test-linux:
+	cargo test --locked --features linux-runtime
+
+test-daemon:
+	cargo test --locked --features daemon
+
+check: fmt lint test
+
+smoke:
+	scripts/perf_smoke.sh
+
+hooks:
+	git config core.hooksPath scripts
 
 fmt:
 	cargo fmt --check

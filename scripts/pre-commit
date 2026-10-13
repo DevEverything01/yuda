@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# pre-commit 最小测试门：秒级反馈，全量留给 CI（见 docs/testing.md）。
+# 启用：make hooks（即 git config core.hooksPath scripts）
+# 在 Linux 开发机上想覆盖 gated 模块：export YUDA_PRECOMMIT_FEATURES=linux-runtime
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+features=()
+if [[ -n "${YUDA_PRECOMMIT_FEATURES:-}" ]]; then
+  features=(--features "$YUDA_PRECOMMIT_FEATURES")
+fi
+
+cargo fmt --check
+# ${features[@]+...} 写法：兼容 bash 3.2 下 set -u 对空数组的 unbound 报错
+cargo clippy --locked --all-targets ${features[@]+"${features[@]}"} -- -D warnings
+cargo test --locked ${features[@]+"${features[@]}"}

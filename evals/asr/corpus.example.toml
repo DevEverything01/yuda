@@ -1,0 +1,31 @@
+# ASR 准确性评估语料清单 —— 格式示例
+# 复制为 corpus.toml 使用。音频本体放 corpus/<scenario>/ 下，不进仓库（见 evals/AGENTS.md）。
+
+# 默认阈值：单样本 CER 上限。CER = 字符级编辑距离 / 参考文本字符数。
+default_max_cer = 0.15
+
+[[sample]]
+file = "corpus/coding/dictate-rust-function.wav"
+scenario = "coding"          # 口述代码，中英混输 + 技术术语
+lang = "zh"
+transcript = "写一个 Rust 函数把蛇形命名转成驼峰命名"
+max_cer = 0.20               # 技术术语场景放宽；不写则用 default_max_cer
+
+[[sample]]
+file = "corpus/chat/weekend-plan.wav"
+scenario = "chat"            # 日常口语，短句、语气词
+lang = "zh"
+transcript = "周末要不要一起去爬山，看天气再说吧"
+
+[[sample]]
+file = "corpus/email/project-update.wav"
+scenario = "email"           # 书面长句，正式表达
+lang = "zh"
+transcript = "你好，这封邮件同步一下本周的项目进展，语音识别模块已经完成联调，下周进入灰度测试。"
+
+# 边界样本（每类至少一条）：
+# - 极短句（<2s）        scenario 任意，标注 duration = 1.5 之类
+# - 超长句（接近 10min 录音上限）
+# - 纯英文技术术语混输    lang = "zh"，transcript 含 Python/JSON/Git 原文
+# - 数字与标点
+# - 背景噪声 / 静音开头结尾
