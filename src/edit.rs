@@ -76,7 +76,10 @@ pub fn parse(instruction: &str) -> EditOp {
         return op;
     }
     let body = text.strip_prefix("请").unwrap_or(&text).trim();
+    let object = body.strip_prefix('把').or_else(|| body.strip_prefix('将'));
 
+    // 「上一句删掉」：识别常吞掉句首的「把」，这里不要求有「把」。
+    let undo_object = object.unwrap_or(body);
     if UNDO_PHRASES.contains(&body)
         || REMOVE_VERBS.iter().any(|verb| {
             UNDO_TARGETS
@@ -86,13 +89,13 @@ pub fn parse(instruction: &str) -> EditOp {
         || UNDO_TARGETS.iter().any(|target| {
             REMOVE_VERBS
                 .iter()
-                .any(|verb| body == format!("把{target}{verb}"))
+                .any(|verb| undo_object == format!("{target}{verb}"))
         })
     {
         return EditOp::DeleteAll;
     }
 
-    if let Some(rest) = body.strip_prefix('把').or_else(|| body.strip_prefix('将')) {
+    if let Some(rest) = object {
         // 「把 A 改成 B」：取第一个出现的动词，A 不能为空。
         if let Some((from, to)) = split_on_first(rest, &REPLACE_VERBS) {
             if !from.is_empty() {
@@ -200,7 +203,34 @@ pub fn apply(op: &EditOp, last: &str) -> Result<Option<String>, EditError> {
         }
         EditOp::Append(addition) => Ok(Some(append(last, addition))),
         EditOp::Prepend(addition) => Ok(Some(format!("{addition}{last}"))),
-        EditOp::Freeform(instruction) => Err(EditError::NeedsLlm(instruction.clone())),
+        EditOp::Freeform(instruction) => {
+            bare_edit(instruction, last).ok_or_else(|| EditError::NeedsLlm(instruction.clone()))
+        }
+    }
+}
+
+/// 识别常吞掉句首的「把」，「把九点改成十点」变成「九点改成十点」。不带「把」的
+/// 「A 改成 B」「A 删掉」只在 A 确实出现在上一段里时按替换或删除处理；否则仍是
+/// 自由指令（「语气改成正式一点」交给 LLM）。
+fn bare_edit(instruction: &str, last: &str) -> Option<Option<String>> {
+    let body = instruction.strip_prefix('请').unwrap_or(instruction).trim();
+    let op = match split_on_first(body, &REPLACE_VERBS) {
+        Some((from, to)) => EditOp::Replace {
+            from: from.to_owned(),
+            to: strip_edges(to),
+        },
+        None => EditOp::Remove(
+            REMOVE_VERBS
+                .iter()
+                .find_map(|verb| body.strip_suffix(verb))?
+                .trim()
+                .to_owned(),
+        ),
+    };
+    match &op {
+        EditOp::Replace { from, to } if from.is_empty() || to.is_empty() => None,
+        EditOp::Remove(target) if target.is_empty() => None,
+        _ => apply(&op, last).ok(),
     }
 }
 
@@ -385,6 +415,29 @@ mod tests {
             "25号下午2点"
         );
         assert_eq!(chinese_numerals_to_digits("十一点半"), "11点半");
+    }
+
+    #[test]
+    fn accepts_instructions_whose_leading_ba_was_not_recognized() {
+        let last = "开饭时间早上9点至下午5点。";
+        assert_eq!(
+            apply(&parse("九点改成十点。"), last).expect("bare replace"),
+            Some("开饭时间早上10点至下午5点。".to_owned())
+        );
+        assert_eq!(
+            apply(&parse("开饭删掉"), last).expect("bare remove"),
+            Some("时间早上9点至下午5点。".to_owned())
+        );
+        assert_eq!(parse("上一句删掉"), EditOp::DeleteAll);
+        // 目标不在上一段里：仍是自由指令，开启 AI 纠错时交给 LLM。
+        assert!(matches!(
+            apply(&parse("语气改成正式一点"), last),
+            Err(EditError::NeedsLlm(_))
+        ));
+        assert!(matches!(
+            apply(&parse("改成英文"), last),
+            Err(EditError::NeedsLlm(_))
+        ));
     }
 
     #[test]
