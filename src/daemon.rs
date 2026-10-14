@@ -104,6 +104,8 @@ struct Daemon {
     released_at: Option<Instant>,
     /// 当前会话是听写还是修改上一段。
     mode: Mode,
+    /// 本次录音开始的时刻；收到第一段音频时记录麦克风启动耗时后清空。
+    capture_started: Option<Instant>,
     last: Option<LastInjection>,
 }
 
@@ -129,6 +131,7 @@ impl Daemon {
             duration_ms: 0,
             released_at: None,
             mode: Mode::Dictate,
+            capture_started: None,
             last: None,
         }
     }
@@ -232,6 +235,7 @@ impl Daemon {
                     ..Snapshot::default()
                 };
                 self.push();
+                self.capture_started = Some(now);
                 tracing::info!(session, "开始录音");
                 Reply::ok()
             }
@@ -286,6 +290,10 @@ impl Daemon {
     fn level(&mut self, session: u64, level: f32) {
         if session != self.controller.session() || self.snapshot.state != State::Recording {
             return;
+        }
+        if let Some(started) = self.capture_started.take() {
+            // 按键到第一段音频的耗时：声卡从休眠唤醒较慢时，句首可能被截掉。
+            tracing::info!(session, ms = started.elapsed().as_millis(), "麦克风已出声");
         }
         self.snapshot.level = level;
         self.snapshot.elapsed_ms = self.controller.elapsed(Instant::now()).as_millis() as u64;

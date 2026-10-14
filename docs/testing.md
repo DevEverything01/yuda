@@ -57,6 +57,8 @@ scripts/omarchy-vm screenshot /tmp/x.png
 
 最近一次结果（2026-10-14，印度宿主机，Omarchy edge `4.0.0.r6942.gf5006bd`，Hyprland 0.56.2，安装路径与软件包相同）：集成检查 4 项、场景 A–K 与三项全局检查全部通过，连续多轮稳定；松手到上屏 255 / 254 / 346 / 246 ms。`makepkg` 构建的 `yuda-git` 软件包经 `pacman -U` 安装后同样全部通过。另行手工验证：从旧版 `b3b779a` 升级（`/usr/local` 安装的旧二进制与旧单元、挂在 `default.target` 的旧链接、旧键名与占位密钥的配置），安装器清理残留、迁移配置后服务正常、`yuda doctor` 全部通过、端到端 A–K 全部通过；Omarchy 菜单两处条目与勾选状态、`omarchy-menu-select` 切换语言后 daemon 热加载、卸载后重装、Catppuccin Latte 主题下胶囊配色跟随。
 
+模拟声卡：`YUDA_VM_AUDIO=pa scripts/omarchy-vm up` 给 VM 加一块 Intel HDA 声卡（`hda-micro`），`YUDA_E2E_MIC=hda scripts/omarchy-e2e` 让测试语音从宿主机 PulseAudio 经 QEMU 声卡模拟、内核 `snd-hda-intel` 驱动、ALSA、PipeWire 进入语打。2026-10-14 这条链路上全部场景通过，松手到上屏 161–182 ms；daemon 日志「麦克风已出声」显示按键到第一段音频 43–67 ms。
+
 未覆盖：真实麦克风硬件、实体键盘布局（AltGr）、GPU 渲染下的动画性能——在实体 Omarchy 机器上抽查。云端识别没有真实密钥时只能由 T2 覆盖协议。
 
 ## 准确性评估
@@ -67,7 +69,7 @@ scripts/omarchy-vm screenshot /tmp/x.png
 YUDA_ASR_CONFIG=/path/config.toml cargo test --locked --features sensevoice --test asr_accuracy -- --ignored --nocapture
 ```
 
-真人语料用 `scripts/record_asr_corpus.sh` 采集。公开 AISHELL-1 朗读语料只能作为声学基线。
+真人语料用 `scripts/record_asr_corpus.sh` 采集。公开语料只能作为声学基线：ASCEND（真人中英混说对话）与 FLEURS（真人普通话朗读）的模型级结果见 ADR 0009。
 
 ## 一次性测试
 

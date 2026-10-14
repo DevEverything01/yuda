@@ -209,7 +209,7 @@ if wait_focus yuda-e2e-b; then
         sleep 0.5
         vm screenshot "$artifacts/b-after.png" >/dev/null
         text=$(gs "cat $out 2>/dev/null")
-        if [[ $text == *tribal* && $text == *pieces* ]]; then
+        if [[ ${text,,} == *"tribal chieftain"* && ${text,,} == *pieces* ]]; then
             pass B "GTK 窗口收到：$text"
         else
             fail B "GTK 窗口内容不符：「$text」"
