@@ -83,9 +83,28 @@ else
     fail setup "Omarchy 菜单扩展缺少语打条目"
 fi
 
-# PipeWire 虚拟麦克风：null sink 的 monitor 设为默认输入。
-gs 'pactl list short modules | grep -q yuda_e2e_mic || pactl load-module module-null-sink sink_name=yuda_e2e_mic sink_properties=device.description=YudaE2EMic >/dev/null
+# 麦克风：
+#   virtual（默认）VM 内 PipeWire null sink 的 monitor 作为默认输入，pw-play 播放
+#   hda             VM 的 Intel HDA 声卡麦克风（omarchy-vm 以 YUDA_VM_AUDIO=pa 启动），宿主机 paplay 播放，
+#                   测试语音经过 QEMU 声卡模拟、内核 snd-hda-intel 驱动、ALSA、PipeWire 才到语打
+mic=${YUDA_E2E_MIC:-virtual}
+host_audio="$artifacts/audio"
+if [[ $mic == hda ]]; then
+    source=$(gs 'pactl list short sources | awk "/alsa_input/ {print \$2; exit}"')
+    if [[ -z $source ]]; then
+        printf '%s\n' 'VM 里没有声卡麦克风：用 YUDA_VM_AUDIO=pa scripts/omarchy-vm up 重启 VM' >&2
+        exit 2
+    fi
+    gs "pactl set-default-source $source && pactl set-source-mute $source 0 && pactl set-source-volume $source 100%"
+    mkdir -p "$host_audio"
+    for name in zh en yue; do
+        vm ssh "cat \$HOME/.local/share/yuda/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/test_wavs/$name.wav" >"$host_audio/$name.wav"
+    done
+    pass setup "麦克风：VM 声卡 $source（宿主机经 QEMU HDA 播放）"
+else
+    gs 'pactl list short modules | grep -q yuda_e2e_mic || pactl load-module module-null-sink sink_name=yuda_e2e_mic sink_properties=device.description=YudaE2EMic >/dev/null
 pactl set-default-source yuda_e2e_mic.monitor'
+fi
 
 state() { gs 'yuda status --json | jq -r .state'; }
 # 修饰键卡住时，场景里的 Enter 会变成 Super+Ctrl+Enter 打开 Herdr；用它做回归检查。
@@ -115,8 +134,14 @@ wait_idle() {
     return 1
 }
 
-# speak <wav>：在 VM 内把音频播进虚拟麦克风（后台）。
-speak() { gs "pw-play --target yuda_e2e_mic $wavs/$1" & }
+# speak <wav>：把测试语音播进麦克风（后台）。
+speak() {
+    if [[ $mic == hda ]]; then
+        vm speak "$host_audio/$1" &
+    else
+        gs "pw-play --target yuda_e2e_mic $wavs/$1" &
+    fi
+}
 
 open_terminal() {
     local title=$1 out=$2
@@ -301,7 +326,13 @@ if ((have_tts)); then
         vm ssh "cat > ~/yuda-e2e-audio/$name.wav" <"$tts_dir/$name.wav"
     done
 fi
-speak_tts() { gs "pw-play --target yuda_e2e_mic \$HOME/yuda-e2e-audio/$1.wav" & }
+speak_tts() {
+    if [[ $mic == hda ]]; then
+        vm speak "$tts_dir/$1.wav" &
+    else
+        gs "pw-play --target yuda_e2e_mic \$HOME/yuda-e2e-audio/$1.wav" &
+    fi
+}
 
 # dictate_into <标题> <输出文件>：打开终端并听写 zh.wav，不按回车，留给后续修改。
 dictate_into() {

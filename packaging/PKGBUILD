@@ -6,11 +6,12 @@ pkgdesc='语打：Omarchy 上对标豆包输入法的中文语音输入（听写
 arch=('x86_64' 'aarch64')
 url='https://github.com/DevEverything01/yuda'
 license=('MIT')
-depends=('wl-clipboard' 'pipewire' 'alsa-lib' 'gcc-libs')
+depends=('alsa-lib' 'bash' 'glibc' 'libgcc' 'libstdc++' 'wl-clipboard')
 optdepends=(
+  'pipewire-alsa: 通过 PipeWire 采集麦克风（Omarchy 默认已装）'
   'wtype: Hyprland 之外的粘贴后端'
   'ydotool: 最后的粘贴后端'
-  'omarchy: 通过 omarchy-install-dictation-yuda 接入 Omarchy 听写快捷键与菜单'
+  'omarchy: 通过 omarchy-install-dictation-yuda 接入 Omarchy 听写快捷键、菜单与 shell 插件'
 )
 makedepends=('git' 'rust' 'clang' 'cmake')
 provides=('yuda')

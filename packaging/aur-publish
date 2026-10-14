@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# 发布或更新 AUR 包 yuda-git。需要你的 AUR 账号：SSH 公钥已添加到 https://aur.archlinux.org 。
+# 在 Arch / Omarchy 上运行：packaging/aur-publish
+set -euo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+revision=$(git -C "$here/.." rev-parse --short HEAD)
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+git clone ssh://aur@aur.archlinux.org/yuda-git.git "$work/yuda-git"
+cp "$here/PKGBUILD" "$here/yuda.install" "$work/yuda-git/"
+cd "$work/yuda-git"
+makepkg --printsrcinfo >.SRCINFO
+namcap PKGBUILD || true
+git add PKGBUILD yuda.install .SRCINFO
+if git diff --cached --quiet; then
+    echo "AUR 上的 yuda-git 已是最新"
+    exit 0
+fi
+git commit -m "Update to upstream $revision"
+git push origin HEAD:master
+echo "已发布：https://aur.archlinux.org/packages/yuda-git"

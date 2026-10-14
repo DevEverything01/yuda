@@ -13,9 +13,12 @@
 #   omarchy-vm hold <qcode> <秒>     通过 QMP 虚拟键盘按住一个键或组合（例如 f9、alt_r、shift+f9）
 #   omarchy-vm tap <qcode>...        通过 QMP 依次轻点按键
 #   omarchy-vm screenshot <file.png> 通过 QMP 截取整屏
+#   omarchy-vm speak <file.wav>      在宿主机把音频播进 VM 声卡的麦克风（需 YUDA_VM_AUDIO=pa 启动）
 #
 # 环境变量：OMARCHY_CHANNEL(edge) YUDA_VM_ROOT(/var/lib/yuda-vm) YUDA_VM_SSH_PORT(2222)
 #           SMP(6) MEM(7G)
+#           YUDA_VM_AUDIO=pa  给 VM 加一块 Intel HDA 声卡（hda-micro），麦克风接宿主机 PulseAudio 的
+#                             YUDA_VM_MIC_SINK（默认 vmmic）null sink；测试语音走真实的内核声卡驱动
 set -euo pipefail
 
 channel=${OMARCHY_CHANNEL:-edge}
@@ -87,6 +90,16 @@ cmd_up() {
     creds=$(printf 'd /home/omarchy/.ssh 0700 omarchy omarchy -\nf+ /home/omarchy/.ssh/authorized_keys 0600 omarchy omarchy - %s\n' \
         "$(cat "$key.pub")" | base64 -w0)
     rm -f "$state/qmp.sock"
+    local -a audio=()
+    if [[ ${YUDA_VM_AUDIO:-} == pa ]]; then
+        local sink=${YUDA_VM_MIC_SINK:-vmmic}
+        local server="unix:${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pulse/native"
+        pactl list short sinks | grep -q "$sink" ||
+            pactl load-module module-null-sink "sink_name=$sink" >/dev/null ||
+            die "宿主机需要运行 PulseAudio（pulseaudio -D --exit-idle-time=-1）"
+        audio=(-audiodev "pa,id=snd0,server=$server,in.name=$sink.monitor"
+            -device intel-hda -device hda-micro,audiodev=snd0)
+    fi
     qemu-system-x86_64 -cpu host -enable-kvm -machine q35,accel=kvm \
         -smp "${SMP:-6}" -m "${MEM:-7G}" \
         -kernel "$image_dir/vmlinuz" -initrd "$image_dir/initrd" \
@@ -97,6 +110,7 @@ cmd_up() {
         -device virtio-vga -device virtio-rng-pci -display none \
         -device qemu-xhci -device usb-kbd -device usb-tablet \
         -netdev "user,id=n0,hostfwd=tcp:127.0.0.1:$port-:22" -device virtio-net-pci,netdev=n0 \
+        "${audio[@]}" \
         -qmp "unix:$state/qmp.sock,server,nowait" \
         -serial "file:$state/serial.log" \
         -pidfile "$state/qemu.pid" -daemonize
@@ -185,6 +199,11 @@ cmd_tap() {
     done
 }
 
+cmd_speak() {
+    (($# == 1)) || die "用法：omarchy-vm speak <file.wav>"
+    paplay -d "${YUDA_VM_MIC_SINK:-vmmic}" "$1"
+}
+
 cmd_screenshot() {
     (($# == 1)) || die "用法：omarchy-vm screenshot <file.png>"
     local target
@@ -198,7 +217,7 @@ cmd_screenshot() {
 command=${1:-}
 shift || true
 case "$command" in
-    fetch | up | down | reset | status | ssh | qmp | hold | tap | screenshot) "cmd_$command" "$@" ;;
+    fetch | up | down | reset | status | ssh | qmp | hold | tap | screenshot | speak) "cmd_$command" "$@" ;;
     *)
         sed -n '2,20p' "$0" >&2
         exit 2
