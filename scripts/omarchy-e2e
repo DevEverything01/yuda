@@ -8,7 +8,7 @@
 # VM 内的 wtype 不能证明全局快捷键可用）。语音是 SenseVoice 自带的测试音频，播进
 # PipeWire 虚拟麦克风，与真实麦克风走同一条 cpal → PipeWire 采集链路。
 #
-#   A  按住 F9          → 文本进入 foot 终端（Ctrl+Shift+V），原剪贴板恢复，历史新增一条
+#   A  按住 F9          → 胶囊显示实时文字；文本进入 foot 终端（Ctrl+Shift+V），原剪贴板恢复，历史新增一条
 #   B  按住 Right Alt   → 英文进入 GTK4 窗口（Ctrl+V）
 #   C  Super+Ctrl+X 两次 → 切换模式录一段粤语
 #   D  轻点 F9（<300ms） → 不识别、不上屏
@@ -111,6 +111,18 @@ state() { gs 'yuda status --json | jq -r .state'; }
 herdr_count() { gs 'pgrep -c -x herdr || true'; }
 herdr_before=$(herdr_count)
 history_count() { gs 'wc -l < ~/.local/state/yuda/history.jsonl 2>/dev/null || echo 0'; }
+# 插件 yuda.dictation 看到的状态，即胶囊显示的内容。
+capsule_status() { gs 'omarchy-shell yuda.dictation status'; }
+# 胶囊浮层（layer-shell namespace = yuda）当前是否映射在屏幕上。
+capsule_mapped() { gs 'hyprctl layers -j | jq -e "any(.[].levels[][]; .namespace == \"yuda\")" >/dev/null'; }
+# 等待胶囊收起（退场动画结束后取消映射）。
+wait_capsule_hidden() {
+    for _ in $(seq 1 20); do
+        capsule_mapped || return 0
+        sleep 0.25
+    done
+    return 1
+}
 
 wait_focus() {
     local title=$1
@@ -161,9 +173,21 @@ if open_terminal yuda-e2e-a "$out"; then
     sleep 0.7
     speak zh.wav
     sleep 3
+    plugin=$(capsule_status)
+    capsule_mapped && mapped=yes || mapped=no
     vm screenshot "$artifacts/a-recording.png" >/dev/null
     wait "$hold"
+    if [[ $mapped == yes && $(jq -r '"\(.online) \(.state)"' <<<"$plugin") == "true recording" && -n $(jq -r .text <<<"$plugin") ]]; then
+        pass A "胶囊在录音中显示实时文字：$(jq -r .text <<<"$plugin")"
+    else
+        fail A "胶囊没有正确显示录音（浮层映射：$mapped）：$plugin"
+    fi
     if wait_idle 20; then
+        if wait_capsule_hidden; then
+            pass A "回到空闲后胶囊收起"
+        else
+            fail A "回到空闲 5 秒后胶囊仍在屏幕上"
+        fi
         vm screenshot "$artifacts/a-after.png" >/dev/null
         vm tap ret
         sleep 1
@@ -489,12 +513,18 @@ if open_terminal yuda-e2e-f "$out"; then
     speak zh.wav
     sleep 2.5
     snapshot=$(gs 'yuda status --json')
+    plugin=$(capsule_status)
     vm screenshot "$artifacts/f-fallback.png" >/dev/null
     wait "$hold"
     if [[ $(jq -r '"\(.engine) \(.fallback)"' <<<"$snapshot") == "offline true" ]]; then
         pass F "云端被拒后自动降级离线"
     else
         fail F "没有降级：$snapshot"
+    fi
+    if [[ $(jq -r .fallback <<<"$plugin") == true ]]; then
+        pass F "胶囊显示离线徽标"
+    else
+        fail F "胶囊没有收到降级标记：$plugin"
     fi
     if wait_idle 20; then
         vm tap ret
