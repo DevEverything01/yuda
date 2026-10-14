@@ -7,6 +7,9 @@
 //! 「模拟流式」做法：VAD 把语音切成句段，已结束的句段解码一次后固定下来；
 //! 正在说的尾段每隔几百毫秒重新解码一次作为实时预览。松手时只需解码最后一段，
 //! 所以最终结果几乎没有等待。
+//!
+//! VAD 只决定在哪里切，不决定丢掉什么：句段前后补边距，VAD 漏判的有声音频（句段之间、
+//! 最后一段之后的轻声）并入相邻句段或在松手时解码。
 
 use anyhow::{bail, Context, Result};
 use sherpa_onnx::{
@@ -31,9 +34,12 @@ const VAD_WINDOW: usize = 512;
 const PARTIAL_INTERVAL: Duration = Duration::from_millis(400);
 /// 尾段短于该长度不做预览解码。
 const MIN_TAIL_SAMPLES: usize = SAMPLE_RATE as usize * 3 / 10;
+/// 句段解码时前后各多取的音频。Silero VAD 的句段起点随 512 样本窗口与语音开头的相位
+/// 变化，实测可比语音开头晚 0.14 s，第一个字被切掉（「把九点改成十点」→「九点改成十点」）。
+const SEGMENT_PADDING: usize = SAMPLE_RATE as usize / 5;
 
-/// 整段兜底解码前要求的最低能量（100 ms 窗口 RMS 的峰值）。低于它基本是静音或底噪，
-/// 送进模型只会得到「그.」一类的幻听。
+/// VAD 句段之外的音频要解码时要求的最低能量（100 ms 窗口 RMS 的峰值）。低于它基本是
+/// 静音或底噪，送进模型只会得到「그.」一类的幻听。
 const MIN_SPEECH_DBFS: f64 = -45.0;
 
 pub struct OfflineEngine {
@@ -223,10 +229,12 @@ impl StreamingSession<'_> {
             let Some(segment) = vad.front() else {
                 break;
             };
-            let text = self.engine.decode(segment.samples());
+            let start = usize::try_from(segment.start()).unwrap_or(0);
+            let (from, to) =
+                segment_range(&self.audio, start, segment.samples().len(), self.tail_start);
+            let text = self.engine.decode(&self.audio[from..to]);
             self.committed = join_segments(&self.committed, &text);
-            let end = usize::try_from(segment.start()).unwrap_or(0) + segment.samples().len();
-            self.tail_start = self.tail_start.max(end.min(self.audio.len()));
+            self.tail_start = self.tail_start.max(to);
             vad.pop();
         }
     }
@@ -274,19 +282,35 @@ impl StreamingSession<'_> {
             vad.flush();
         }
         self.drain_segments();
-        if !self.committed.is_empty() {
-            return self.committed;
+        // 最后一段之后还有声音：VAD 漏判的轻声（停顿后小声补的半句），或没有 VAD、
+        // VAD 一段都没切出来。有足够能量才解码。
+        let rest = &self.audio[self.tail_start.min(self.audio.len())..];
+        if peak_dbfs(rest) >= MIN_SPEECH_DBFS {
+            let text = self.engine.decode(rest);
+            self.committed = join_segments(&self.committed, &text);
         }
-        // 没有 VAD，或 VAD 一段语音都没切出来（声音很轻）：有足够能量才整段解码兜底。
-        if peak_dbfs(&self.audio) < MIN_SPEECH_DBFS {
-            return String::new();
-        }
-        self.engine.decode(&self.audio)
+        self.committed
     }
 
     pub fn duration(&self) -> Duration {
         Duration::from_secs_f32(self.audio.len() as f32 / SAMPLE_RATE as f32)
     }
+}
+
+/// 句段在整段音频里的解码范围：前后各加 `SEGMENT_PADDING`，不早于上一段解码的终点，
+/// 不超出已录音频。与上一段之间的音频有声音（VAD 漏判的轻声）时从上一段终点开始，
+/// 不丢有声音的音频。
+fn segment_range(audio: &[f32], start: usize, len: usize, previous_end: usize) -> (usize, usize) {
+    let total = audio.len();
+    let previous_end = previous_end.min(total);
+    let mut from = start
+        .saturating_sub(SEGMENT_PADDING)
+        .clamp(previous_end, total);
+    if peak_dbfs(&audio[previous_end..from]) >= MIN_SPEECH_DBFS {
+        from = previous_end;
+    }
+    let to = (start + len + SEGMENT_PADDING).min(total).max(from);
+    (from, to)
 }
 
 /// 100 ms 窗口 RMS 的峰值（dBFS）。
@@ -318,5 +342,39 @@ mod tests {
         let speech: Vec<f32> = (0..16_000).map(|i| 0.2 * (i as f32 / 10.0).sin()).collect();
         assert!(peak_dbfs(&speech) > MIN_SPEECH_DBFS);
         assert_eq!(peak_dbfs(&[]), -180.0);
+    }
+
+    #[test]
+    fn segments_are_decoded_with_context_but_never_overlap() {
+        let pad = SEGMENT_PADDING;
+        let silence = vec![0.0; 80_000];
+        // 语音前有足够的静音：前后各补 pad。
+        assert_eq!(
+            segment_range(&silence, 32_000, 16_000, 0),
+            (32_000 - pad, 48_000 + pad)
+        );
+        // 开头和结尾不越界。
+        assert_eq!(
+            segment_range(&silence[..9_500], 1_000, 8_000, 0),
+            (0, 9_500)
+        );
+        // 不回退到上一段已经解码过的音频。
+        assert_eq!(
+            segment_range(&silence, 40_000, 8_000, 39_000),
+            (39_000, 48_000 + pad)
+        );
+    }
+
+    #[test]
+    fn audible_audio_that_vad_skipped_joins_the_next_segment() {
+        // 上一段在 16 000 结束；24 000–28 000 是 VAD 没判为语音的轻声（约 -30 dBFS）。
+        let mut audio = vec![0.0; 80_000];
+        for (i, sample) in audio[24_000..28_000].iter_mut().enumerate() {
+            *sample = 0.03 * (i as f32 / 10.0).sin();
+        }
+        assert_eq!(
+            segment_range(&audio, 48_000, 8_000, 16_000),
+            (16_000, 56_000 + SEGMENT_PADDING)
+        );
     }
 }

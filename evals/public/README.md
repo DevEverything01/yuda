@@ -18,4 +18,12 @@ THREADS=4 .venv/bin/python /path/to/yuda/evals/public/eval_corpus.py zipformer a
 THREADS=4 .venv/bin/python /path/to/yuda/evals/public/eval_corpus.py sensevoice fleurs
 ```
 
-方法：去标点、英文小写，中文按字、英文按词计算混合错误率（MER）；两个模型都关闭各自的数字规整；参考文本含阿拉伯数字的句子不计入。评估的是模型本身，不含语打的 VAD 分段与文本规整。
+方法：去标点、英文小写，中文按字、英文按词计算混合错误率（MER）；两个模型都关闭各自的数字规整；参考文本含阿拉伯数字的句子不计入。默认评估模型本身（整句一次解码），不含语打的 VAD 分段与文本规整。
+
+环境变量：
+
+| 变量 | 作用 |
+|---|---|
+| `SEGMENT=vad` | 走 daemon 的分段路径（与 `src/offline.rs` 一致）：句前加 `LEAD` 秒静音（默认 1.0），Silero VAD 切句后分段解码 |
+| `SEGMENT=vad-legacy` | 2026-10-14 之前的分段方式，只用于对比（结果见 ADR 0009） |
+| `ASR_BENCH`、`YUDA_MODELS` | 语料目录（默认 `~/asr-bench`）与模型目录（默认 `~/.local/share/yuda/models`） |

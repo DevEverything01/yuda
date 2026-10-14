@@ -29,7 +29,8 @@ start ──► audio::Capture（cpal → PipeWire，单声道 16 kHz，30 Hz �
               ▼                         ▼
           asr 工作线程               daemon 主循环 ──► 订阅者（shell 插件、yuda watch）
           ├─ 云端：cloud_asr（火山引擎豆包大模型，WebSocket 二进制协议，100 ms 分包）
-          └─ 离线：offline（中英 zipformer / 粤日韩 SenseVoice + Silero VAD 分段，尾段重解码出预览）
+          └─ 离线：offline（中英 zipformer / 粤日韩 SenseVoice + Silero VAD 分段，尾段重解码出预览；
+                           句段补边距，VAD 漏判的有声音频不丢）
               │ Partial / Final
               ▼
 stop  ──► text::process（去语气词、时间数字规整、缩写合并、技术名词写法、中英间距、用户词库、标点整理）
@@ -58,7 +59,7 @@ stop  ──► text::process（去语气词、时间数字规整、缩写合并
 | `history` | 识别历史 jsonl，定长压缩 | 默认 |
 | `omarchy` | 菜单扩展的标记块合并/移除与 JSONC 校验 | 默认 |
 | `audio` | cpal 采集、下混、线性重采样、电平 | `audio` |
-| `offline` | 按目录识别模型族（SenseVoice / transducer）、按语言选模型、VAD 模拟流式、静音能量门 | `sensevoice` |
+| `offline` | 按目录识别模型族（SenseVoice / transducer）、按语言选模型、VAD 模拟流式（句段补边距、漏判音频并入相邻句段）、静音能量门 | `sensevoice` |
 | `cloud_asr` | 火山引擎大模型流式识别客户端 | `cloud` |
 | `refine` | LLM 保守纠错与偏离检查 | `llm` |
 | `asr` | 识别工作线程：常驻离线模型、按会话路由引擎、降级 | `audio` + `sensevoice` |
